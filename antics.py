@@ -925,7 +925,7 @@ ALL = {"trip": Trip, "football": Football, "nfl": NflThrow, "sneeze": Sneeze,
        "emote:Wave": make_emote("Wave"), "emote:Flex": make_emote("Flex"), "emote:Laugh": make_emote("Laugh"),
        "snackgame": SnackGame}
 # How likely each one is in the random pick (football + NFL a bit more, doze-off rare).
-WEIGHTS = {"trip": 3, "football": 4, "nfl": 4, "sneeze": 3, "butterfly": 3, "spin": 3, "doze": 1, "climb": 3}
+WEIGHTS = {"trip": 3, "football": 4, "nfl": 4, "sneeze": 3, "butterfly": 3, "doze": 1, "climb": 3}
 
 # v1.2: more random antics (blaster, banana, gum, dumbbell, plane, balloon, chili, skateboard, magic)
 import antics2  # noqa: E402,F401  (registers itself in ALL / WEIGHTS)

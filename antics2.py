@@ -85,8 +85,14 @@ class FullAuto(Antic):
             self.pet.draw_body(p, state="idle", expr="happy")
             draw_blaster(p, k, 60 + f * 30, 86, 0, f)
         elif t < 4.3:                                # oops, full auto
-            spin = math.sin(t * 9) * 25 + (360 * max(0, min(1, (t - 2.6) / 0.6)))
-            self.pet.draw_body(p, state="fall", expr=None, angle=spin * 0.4, pivot=(60, 80))
+            lean = -f * (14 + math.sin(t * 30) * 4)       # skidding backwards, leaning into it
+            self.pet.draw_body(p, state="fall", expr=None, angle=lean, pivot=(60, 110),
+                               dx=math.sin(t * 40) * 1.5)
+            p.setPen(Qt.PenStyle.NoPen)
+            for i in range(3):                             # dust puffs from his skidding feet
+                u = (t * 3 + i / 3) % 1.0
+                p.setBrush(QColor(220, 220, 230, int(150 * (1 - u))))
+                p.drawEllipse(QPointF((60 + f * (10 + u * 22)) * k, (110 - u * 6) * k), (3 + u * 4) * k, (2 + u * 3) * k)
             gx, gy = 60 + f * 30, 84
             draw_blaster(p, k, gx, gy, math.sin(t * 30) * 8, f)
             p.setPen(Qt.PenStyle.NoPen)

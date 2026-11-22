@@ -62,6 +62,8 @@ if IS_WINDOWS:
     user32.GetWindowTextLengthW.argtypes = [wintypes.HWND]
     user32.GetWindowTextW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
     user32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
+    user32.MonitorFromPoint.restype = wintypes.HMONITOR
+    user32.MonitorFromPoint.argtypes = [wintypes.POINT, wintypes.DWORD]
 
     user32.GetWindowLongW.argtypes = [wintypes.HWND, ctypes.c_int]
     user32.GetWindowLongW.restype = ctypes.c_long
@@ -111,6 +113,39 @@ def _title(hwnd):
     return buf.value
 
 
+NOT_GAMES = {"brave.exe", "chrome.exe", "msedge.exe", "firefox.exe", "opera.exe", "opera_gx.exe",
+             "vivaldi.exe", "explorer.exe", "code.exe", "discord.exe", "spotify.exe", "notepad.exe",
+             "devenv.exe", "teams.exe", "ms-teams.exe", "slack.exe", "obs64.exe", "winword.exe",
+             "excel.exe", "powerpnt.exe", "outlook.exe", "claude.exe", "windowsterminal.exe"}
+GAME_MONITOR = {"rect": None}       # the monitor the game is on (physical pixels), for "move to the other screen"
+
+
+def _proc_name(pid):
+    try:
+        import psutil
+        return psutil.Process(pid).name().lower()
+    except Exception:
+        return ""
+
+
+def _game_monitor(fg, r):
+    """Which monitor is the game really on? If its window spans several, use the one with the
+    mouse cursor (that's where you play), else the one Windows picks."""
+    pt = wintypes.POINT()
+    user32.GetCursorPos(ctypes.byref(pt))
+    hmon = user32.MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST)
+    mi = MONITORINFO(); mi.cbSize = ctypes.sizeof(mi)
+    if user32.GetMonitorInfoW(hmon, ctypes.byref(mi)):
+        m = mi.rcMonitor
+        if r.left <= m.left and r.right >= m.right and r.top <= m.top and r.bottom >= m.bottom:
+            return (m.left, m.top, m.right, m.bottom)
+    hmon = user32.MonitorFromWindow(fg, MONITOR_DEFAULTTONEAREST)
+    if user32.GetMonitorInfoW(hmon, ctypes.byref(mi)):
+        m = mi.rcMonitor
+        return (m.left, m.top, m.right, m.bottom)
+    return None
+
+
 def _fullscreen_check(my_hwnd):
     """Is a game / fullscreen app in front? Checks, in order:
       1. Windows itself says a fullscreen app or game is running (SHQueryUserNotificationState)
@@ -128,11 +163,17 @@ def _fullscreen_check(my_hwnd):
     user32.GetWindowThreadProcessId(fg, ctypes.byref(pid))
     if pid.value == __import__("os").getpid():
         return None
-    # 1. Windows' own "busy / fullscreen / game" signal
+    r = wintypes.RECT()
+    user32.GetWindowRect(fg, ctypes.byref(r))
+    GAME_MONITOR["rect"] = _game_monitor(fg, r)
+    proc = _proc_name(pid.value)
+    if proc in NOT_GAMES:                                  # browsers, Explorer, Discord... are not games
+        return None
+    # 1. Windows' own "fullscreen app / game / presentation" signal
     state = ctypes.c_int(0)
     try:
         if ctypes.WinDLL("shell32").SHQueryUserNotificationState(ctypes.byref(state)) == 0 \
-                and state.value in (3, 4, 5):            # BUSY, RUNNING_D3D_FULL_SCREEN, PRESENTATION
+                and state.value in (3, 4):               # D3D FULLSCREEN game, PRESENTATION
             return name.value or "fullscreen"
     except Exception:
         pass
@@ -147,8 +188,6 @@ def _fullscreen_check(my_hwnd):
     style = user32.GetWindowLongW(fg, GWL_STYLE)
     if style & WS_CAPTION == WS_CAPTION or user32.IsZoomed(fg):
         return None
-    r = wintypes.RECT()
-    user32.GetWindowRect(fg, ctypes.byref(r))
     for hmon in _monitors():
         mi = MONITORINFO()
         mi.cbSize = ctypes.sizeof(mi)
@@ -435,6 +474,10 @@ class PetWindow(QWidget):
 
         if self.hidden_for_game:
             self.bubble.hide()
+            until = getattr(self, "hide_until", None)
+            if until and now >= until and getattr(self, "manual_hidden", False):
+                self.toggle_manual_hide()                # time's up: back again
+                self.bubble.say("I'm back!", "Did you miss me?", 3)
             return                       # paused: do nothing, draw nothing
 
         self.check_music()
@@ -1006,9 +1049,17 @@ class PetWindow(QWidget):
         elif not away and self.state == "sleep" and not self.napping:
             self.set_state("idle")                      # you're back, wake up
 
+    def hide_for(self, seconds=None):
+        """Hide Blip for a while (None = until you bring him back)."""
+        self.hide_until = time.monotonic() + seconds if seconds else None
+        if not getattr(self, "manual_hidden", False):
+            self.toggle_manual_hide()
+
     def toggle_manual_hide(self):
         """Tray / menu: hide Blip until you bring him back."""
         self.manual_hidden = not getattr(self, "manual_hidden", False)
+        if not self.manual_hidden:
+            self.hide_until = None
         if self.manual_hidden:
             self.hidden_for_game = True
             self.bubble.hide()
@@ -1024,17 +1075,54 @@ class PetWindow(QWidget):
         if not config.HIDE_IN_FULLSCREEN or self.state == "held":
             return
         full = fullscreen_app_on_my_screen(int(self.winId()))
-        if full and not self.hidden_for_game:
-            print(f"Hiding: a fullscreen app is on my screen ({full}). "
-                  "Turn this off in Customise & settings if it's wrong.")
-            self.hidden_for_game = True
-            self.hide()
+        if full:
+            spare = self.spare_screen() if config.GAME_MODE == "Move" else None
+            if spare is not None:
+                if self.hidden_for_game:                     # was hidden: come back on the spare screen
+                    self.hidden_for_game = False
+                    self.show()
+                if not getattr(self, "game_quiet", False):
+                    self.game_quiet = True                   # quiet on the other screen: no pop-ups
+                    self.home_before_game = (self.x_pos, self.y_pos)
+                if self.current_screen() is not spare:
+                    self.end_antic()
+                    self.perch = None
+                    area = spare.availableGeometry()
+                    self.x_pos = area.left() + area.width() * 0.6
+                    self.stick_to_ground()
+                    self.set_state("idle")
+            elif not self.hidden_for_game:
+                self.hidden_for_game = True
+                self.bubble.hide()
+                self.hide()
             self.apply_fps()
-        elif not full and self.hidden_for_game:
-            print("Fullscreen app gone, I'm back!")
-            self.hidden_for_game = False
-            self.show()
-            self.apply_fps()
+        else:
+            if self.hidden_for_game:
+                self.hidden_for_game = False
+                self.show()
+                self.apply_fps()
+            if getattr(self, "game_quiet", False):
+                self.game_quiet = False
+                home = getattr(self, "home_before_game", None)
+                if home:                                     # back to where he was
+                    self.x_pos, self.y_pos = home
+                    self.stick_to_ground()
+
+    def spare_screen(self):
+        """A monitor the game is NOT on (or None if there's only one screen)."""
+        rect = GAME_MONITOR.get("rect")
+        screens = QGuiApplication.screens()
+        if len(screens) < 2 or rect is None:
+            return None
+        cx, cy = (rect[0] + rect[2]) / 2, (rect[1] + rect[3]) / 2
+        others = []
+        for s_ in screens:
+            g, dpr = s_.geometry(), s_.devicePixelRatio() or 1.0
+            phys_left, phys_top = g.left(), g.top()          # (same position at 100 % scaling)
+            phys_w, phys_h = g.width() * dpr, g.height() * dpr
+            if not (phys_left <= cx < phys_left + phys_w and phys_top <= cy < phys_top + phys_h):
+                others.append(s_)
+        return others[0] if others else None
 
     # ---------- physics ---------------------------------------------------------
     def physics(self, dt):
@@ -1433,7 +1521,8 @@ class PetWindow(QWidget):
     # ---------- v1.2: PC care, nudges, summary, time props ----------------------------------
     def care_ok(self):
         import extras
-        return (not self.hidden_for_game and not extras.dnd_on() and extras.focus_left() <= 0
+        return (not self.hidden_for_game and not getattr(self, "game_quiet", False)
+                and not extras.dnd_on() and extras.focus_left() <= 0
                 and self.state != "sleep" and self.ask is None and self.chat is None
                 and self.antic is None and self.game is None)
 
@@ -1818,6 +1907,8 @@ class PetWindow(QWidget):
 
     def maybe_antic(self, now):
         import antics
+        if getattr(self, "game_quiet", False):
+            return
         if __import__("extras").dnd_on():
             return
         debug = __import__("os").getenv("BLIP_DEBUG_ANTICS")   # hidden: every 15 s, in turn

@@ -17,7 +17,7 @@ from PyQt6.QtGui import QPainterPath, QPen
 import config
 from character import THEMES, rgba
 
-MOVES = ["roof", "shuffle", "wiggle", "floss", "dab", "robot", "disco", "spin"]
+MOVES = ["roof", "shuffle", "wiggle", "floss", "dab", "robot", "disco"]   # (no spinning)
 
 
 class Dancer:
@@ -62,7 +62,7 @@ class Dancer:
         lv = min(1.0, 0.35 + level * 1.8)
         move = self.move
         if now < self.big_until:                             # big move: spin, then dab
-            move = "spin" if self.big_until - now > 1.2 else "dab"
+            move = "shuffle" if self.big_until - now > 1.2 else "dab"
         t = now - pet.start
         sw = math.sin(u * 2 * math.pi)                       # -1..1 swing on the beat
         f = pet.facing

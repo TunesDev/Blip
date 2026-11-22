@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.2.2
+
+- Games with 2+ monitors: Blip moves to your other screen and stays quiet there, then comes back after
+  the game (setting: "During fullscreen games: Move to my other screen / Hide")
+- Fix: browsers (Brave, Chrome, Edge, Firefox...) no longer make Blip disappear
+- Hide Blip for 15 min / 1 hour / 3 hours / until you bring him back (right-click or tray menu, or say
+  "hide for an hour" in the chat); he comes back with "I'm back!"
+- No more spinning: the spin antic and spin dance move are gone, and the toy blaster now makes him
+  skid backwards instead of spinning
+
 ## 1.2.1
 
 - Fix: Blip now hides properly during games like Call of Duty (borderless fullscreen windows that span

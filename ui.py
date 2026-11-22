@@ -158,6 +158,13 @@ def build_menu(pet, app) -> QMenu:
     menu.addMenu(play)
 
     menu.addSeparator()
+    hide = glass_menu(menu)
+    hide.setTitle("Hide Blip")
+    hide.addAction("For 15 minutes", lambda: pet.hide_for(15 * 60))
+    hide.addAction("For 1 hour", lambda: pet.hide_for(3600))
+    hide.addAction("For 3 hours", lambda: pet.hide_for(3 * 3600))
+    hide.addAction("Until I bring him back", lambda: pet.hide_for(None))
+    menu.addMenu(hide)
     menu.addAction("Customise && settings…", lambda: SettingsDialog(pet).exec())
     menu.addAction("Quit", app.quit)
 
@@ -864,6 +871,14 @@ class ChatWindow(GlassDialog):
             self.pet.start_focus(max(1, min(mins, 180)))
             self.add("blip", f"Focus mode on for {mins} minutes 🎯 I'll stay quiet and tell you when it's break time.")
             return
+        import re as _r
+        hm = _r.search(r"\bhide\b.*?\bfor\b\s*(an?|\d+)\s*(min|minute|minutes|hour|hours|hr|h)\b", text, _r.I)
+        if hm:
+            n = 1 if hm.group(1).lower() in ("a", "an") else int(hm.group(1))
+            secs = n * (3600 if hm.group(2).lower().startswith("h") else 60)
+            self.add("blip", f"Okay, see you in {n} {'hour' if secs >= 3600 and n == 1 else hm.group(2)}! Right-click the tray icon to bring me back sooner.")
+            QTimer.singleShot(1200, lambda: (self.close(), self.pet.hide_for(secs)))
+            return
         pc = self.pc_command(text)
         if pc:
             self.add("blip", pc)
@@ -1446,6 +1461,11 @@ class MoreOptionsDialog(GlassDialog):
         self.nl_games = QCheckBox("Off while gaming"); self.nl_games.setChecked(config.NIGHT_LIGHT_OFF_IN_GAMES)
         nl.addWidget(self.nl_games)
         self.root.addLayout(nl)
+        gm = QHBoxLayout(); gm.addWidget(QLabel("During fullscreen games"))
+        self.game_mode = QComboBox(); self.game_mode.addItems(["Move to my other screen", "Hide"])
+        self.game_mode.setCurrentIndex(0 if config.GAME_MODE == "Move" else 1)
+        gm.addWidget(self.game_mode); gm.addStretch()
+        self.root.addLayout(gm)
         self.props = QCheckBox("Morning coffee mug and nightcap")
         self.props.setChecked(config.TIME_PROPS)
         self.clip = QCheckBox("Clipboard helper: copied colour codes and sums show in a bubble")
@@ -1475,6 +1495,7 @@ class MoreOptionsDialog(GlassDialog):
         config.DAILY_SUMMARY = self.summary.isChecked()
         config.TIME_PROPS = self.props.isChecked()
         config.CLIPBOARD_HELPER = self.clip.isChecked()
+        config.GAME_MODE = "Move" if self.game_mode.currentIndex() == 0 else "Hide"
         config.NIGHT_LIGHT_MODE = self.nl_mode.currentText()
         config.NIGHT_LIGHT_FROM = int(self.nl_from.currentText())
         config.NIGHT_LIGHT_TO = int(self.nl_to.currentText())
