@@ -70,7 +70,14 @@ def main():
 
     tray = QSystemTrayIcon(make_icon(), app)
     tray.setToolTip(f"{config.APP_NAME}\n{config.CREDIT}")
-    tray.setContextMenu(menu)        # right-click the tray icon
+    tray_menu = ui.glass_menu()
+    hide_act = tray_menu.addAction("Hide Blip for now", lambda: (pet.toggle_manual_hide(),
+                                   hide_act.setText("Show Blip" if getattr(pet, "manual_hidden", False)
+                                                    else "Hide Blip for now")))
+    tray_menu.addSeparator()
+    for a in menu.actions():
+        tray_menu.addAction(a)
+    tray.setContextMenu(tray_menu)   # right-click the tray icon (+ "Hide Blip for now")
     tray.activated.connect(          # left-click the tray icon too
         lambda reason: menu.popup(QCursor.pos())
         if reason == QSystemTrayIcon.ActivationReason.Trigger else None)

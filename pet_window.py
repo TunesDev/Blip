@@ -59,6 +59,9 @@ if IS_WINDOWS:
     user32.GetMonitorInfoW.argtypes = [wintypes.HMONITOR, ctypes.POINTER(MONITORINFO)]
     user32.GetWindowRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
     user32.GetClassNameW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
+    user32.GetWindowTextLengthW.argtypes = [wintypes.HWND]
+    user32.GetWindowTextW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
+    user32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
 
     user32.GetWindowLongW.argtypes = [wintypes.HWND, ctypes.c_int]
     user32.GetWindowLongW.restype = ctypes.c_long
@@ -101,36 +104,67 @@ def fullscreen_app_on_my_screen(my_hwnd: int):
         return None
 
 
+def _title(hwnd):
+    n = user32.GetWindowTextLengthW(hwnd)
+    buf = ctypes.create_unicode_buffer(n + 1)
+    user32.GetWindowTextW(hwnd, buf, n + 1)
+    return buf.value
+
+
 def _fullscreen_check(my_hwnd):
+    """Is a game / fullscreen app in front? Checks, in order:
+      1. Windows itself says a fullscreen app or game is running (SHQueryUserNotificationState)
+      2. the window in front is a known game (Call of Duty, Fortnite, Valorant...)
+      3. the window in front covers a whole monitor (borderless or exclusive fullscreen) -
+         even if it spans several monitors, like Call of Duty can."""
     fg = user32.GetForegroundWindow()
     if not fg or fg == my_hwnd:
         return None
-
     name = ctypes.create_unicode_buffer(64)
     user32.GetClassNameW(fg, name, 64)
     if name.value in IGNORE_CLASSES:
         return None
-
-    # Normal or maximised windows (VS Code, a browser...) never count.
+    pid = wintypes.DWORD()
+    user32.GetWindowThreadProcessId(fg, ctypes.byref(pid))
+    if pid.value == __import__("os").getpid():
+        return None
+    # 1. Windows' own "busy / fullscreen / game" signal
+    state = ctypes.c_int(0)
+    try:
+        if ctypes.WinDLL("shell32").SHQueryUserNotificationState(ctypes.byref(state)) == 0 \
+                and state.value in (3, 4, 5):            # BUSY, RUNNING_D3D_FULL_SCREEN, PRESENTATION
+            return name.value or "fullscreen"
+    except Exception:
+        pass
+    # 2. a known game in front
+    try:
+        import buddy
+        if buddy.game_title([_title(fg)]):
+            return name.value or "game"
+    except Exception:
+        pass
+    # 3. covers a whole monitor (but normal maximised windows never count)
     style = user32.GetWindowLongW(fg, GWL_STYLE)
     if style & WS_CAPTION == WS_CAPTION or user32.IsZoomed(fg):
         return None
-
-    fg_monitor = user32.MonitorFromWindow(fg, MONITOR_DEFAULTTONEAREST)
-    my_monitor = user32.MonitorFromWindow(my_hwnd, MONITOR_DEFAULTTONEAREST)
-    if fg_monitor != my_monitor:
-        return None    # game is on your other screen -> pet can stay
-
-    mi = MONITORINFO()
-    mi.cbSize = ctypes.sizeof(mi)
-    if not user32.GetMonitorInfoW(fg_monitor, ctypes.byref(mi)):
-        return None
     r = wintypes.RECT()
     user32.GetWindowRect(fg, ctypes.byref(r))
-    m = mi.rcMonitor
-    if r.left <= m.left and r.top <= m.top and r.right >= m.right and r.bottom >= m.bottom:
-        return name.value or "unknown"
+    for hmon in _monitors():
+        mi = MONITORINFO()
+        mi.cbSize = ctypes.sizeof(mi)
+        if user32.GetMonitorInfoW(hmon, ctypes.byref(mi)):
+            m = mi.rcMonitor
+            if r.left <= m.left and r.top <= m.top and r.right >= m.right and r.bottom >= m.bottom:
+                return name.value or "unknown"
     return None
+
+
+def _monitors():
+    found = []
+    Proc = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HMONITOR, wintypes.HDC, ctypes.POINTER(wintypes.RECT),
+                              wintypes.LPARAM)
+    user32.EnumDisplayMonitors(None, None, Proc(lambda h, dc, r, lp: found.append(h) or True), 0)
+    return found
 
 
 # ---------------------------------------------------------------------------
@@ -972,7 +1006,21 @@ class PetWindow(QWidget):
         elif not away and self.state == "sleep" and not self.napping:
             self.set_state("idle")                      # you're back, wake up
 
+    def toggle_manual_hide(self):
+        """Tray / menu: hide Blip until you bring him back."""
+        self.manual_hidden = not getattr(self, "manual_hidden", False)
+        if self.manual_hidden:
+            self.hidden_for_game = True
+            self.bubble.hide()
+            self.hide()
+        else:
+            self.hidden_for_game = False
+            self.show()
+        self.apply_fps()
+
     def check_fullscreen(self):
+        if getattr(self, "manual_hidden", False):
+            return
         if not config.HIDE_IN_FULLSCREEN or self.state == "held":
             return
         full = fullscreen_app_on_my_screen(int(self.winId()))

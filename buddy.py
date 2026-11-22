@@ -219,10 +219,12 @@ ROASTS = ["Oof 💀 Lag, right? Definitely the lag.", "Unlucky! 💀 The enemy t
 def game_title(titles):
     """The running game's name if a known game window is open, else None."""
     for t in titles:
-        low = t.lower()
+        # some games (Call of Duty) put invisible zero-width characters in their title
+        low = re.sub(r"[\u200b-\u200f\u2060\ufeff]", "", t).lower()
         for g in GAME_TITLES:
             if g in low:
-                return t.strip() or g.title()
+                clean = re.sub(r"[\u200b-\u200f\u2060\ufeff]", "", t).strip()
+                return clean or g.title()
     return None
 
 

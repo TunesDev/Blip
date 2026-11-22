@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.2.1
+
+- Fix: Blip now hides properly during games like Call of Duty (borderless fullscreen windows that span
+  several monitors, games with hidden characters in their title, and Windows' own "game running" signal)
+- Game buddy now recognises Call of Duty correctly
+- New tray option: "Hide Blip for now"
+
 ## 1.2.0
 
 - PC care (can be switched off): low disk space alert, weekly tidy-up (temp files + Recycle Bin, asks first),
