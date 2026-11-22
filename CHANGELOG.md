@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.3.0
+
+- Real radio stations: RTÉ Radio 1, RTÉ 2FM, RTÉ Gold, Today FM, 98FM, Beat 102 103, Newstalk, BBC Radio 1 & 2,
+  Capital, Capital XTRA, Capital Dance, KISS, Heart, Radio X, Smooth, plus chill/lofi/dance stations
+- Search thousands of real stations worldwide (by name, country, genre), favourites and recently played
+- New radio window: big now-playing card with live equaliser, play/pause, next/previous, stop,
+  volume slider and mute button
+- The radio no longer plays over your music: starting the radio pauses your other player, and if you start
+  other music the radio pauses itself
+- AI chat setup in one click: "Set it up for me" installs Ollama (official, signature-checked) and downloads
+  Blip's brain with a progress bar and Cancel/Retry. Nothing downloads without your click.
+- Without the AI brain Blip still answers helpfully (music opens the radio, "what can you do" shows a list)
+- New setting: AI chat on/off
+
 ## 1.2.2
 
 - Games with 2+ monitors: Blip moves to your other screen and stays quiet there, then comes back after

@@ -62,6 +62,8 @@ class Helper:
             self.media_control("try_toggle_play_pause_async")
         elif cmd == "next":
             self.media_control("try_skip_next_async")
+        elif cmd == "pause_media":                        # pause other music when the radio starts
+            self.media_control("try_pause_async")
         elif cmd == "previous":
             self.media_control("try_skip_previous_async")
         elif cmd == "radio_play":

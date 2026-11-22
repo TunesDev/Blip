@@ -905,6 +905,12 @@ class ChatWindow(GlassDialog):
             open_helper(self.pet)
         self.partial = ""
         self.render()
+        self.last_text = text
+        if not config.AI_CHAT:                          # AI chat switched off: built-in answers only
+            self.partial = None
+            self.render()
+            self.add("blip", self.offline_answer(text))
+            return
         self.send_btn.setEnabled(False)
         self.brain.send(text)
 
@@ -990,49 +996,87 @@ class ChatWindow(GlassDialog):
 
     def on_failed(self, msg):
         self.partial = None
-        self.add("blip", msg)
         self.send_btn.setEnabled(True)
-        if ("brain" in msg or "Ollama" in msg) and not getattr(self, "brain_help", None):
+        if msg == "NO_BRAIN":
+            self.add("blip", self.offline_answer(getattr(self, "last_text", "")))
             self.show_brain_help()
+        else:
+            self.add("blip", msg)
+
+    CAN_DO = ("Here's what I can do right now:\n"
+              "• \"remind me in 20 min to check the oven\"  • \"add milk to my list\"\n"
+              "• \"play some radio\" / \"play chill radio\"  • \"focus for 25 min\"\n"
+              "• \"I'm going to play CoD\" (opens your apps)  • \"how am I doing?\" (game stats)\n"
+              "• \"power saving mode\"  • \"night light on\"  • \"hide for an hour\"")
+
+    def offline_answer(self, text):
+        """No AI brain: still answer the common things helpfully."""
+        import re
+        low = (text or "").lower()
+        if re.search(r"music|song|listen|tunes|radio", low):
+            QTimer.singleShot(400, lambda: open_radio(self.pet))
+            return "I've got real radio stations! 📻 I opened my radio: pick one, or say \"play chill radio\"."
+        if re.search(r"what can you do|help|commands|how do (i|you)", low):
+            return self.CAN_DO
+        if re.search(r"\b(hi|hello|hey|yo|sup)\b", low):
+            return "Hey! 👋 " + self.CAN_DO
+        return "I can't chat about everything yet. For that I need my AI brain (free, set it up below). " + self.CAN_DO
 
     def show_brain_help(self):
-        """No AI yet: the built-in commands still work; offer to set up the AI (never automatic)."""
-        import shutil
-        self.add("note", "I can still do reminders, lists, apps, radio, focus and your game stats "
-                         "without my AI brain. For free chatting, I need Ollama (free) + a 2 GB brain.")
+        """One-click AI setup card (nothing downloads until you press the button)."""
+        if not config.AI_CHAT or getattr(self, "brain_help", None):
+            return
+        import aisetup
+        need_ollama = aisetup.ollama_exe() is None
+        box = QWidget()
+        box.setStyleSheet("QWidget#card{background:rgba(255,255,255,14);border:1px solid rgba(160,110,255,110);"
+                          "border-radius:10px}")
+        box.setObjectName("card")
+        lay = QVBoxLayout(box); lay.setContentsMargins(10, 8, 10, 8)
+        self.setup_label = QLabel("Turn on chatting? I need Ollama (free)" + (" and" if need_ollama else ":") +
+                                  " my brain: a 2 GB download (about 2 GB of disk space).")
+        self.setup_label.setWordWrap(True)
+        lay.addWidget(self.setup_label)
+        self.setup_bar = GlassBar(0, "", 320); self.setup_bar.hide()
+        lay.addWidget(self.setup_bar)
         row = QHBoxLayout()
-        get = QPushButton("Get Ollama"); get.setAutoDefault(False)
-        get.clicked.connect(lambda: __import__("webbrowser").open("https://ollama.com/download"))
-        dl = QPushButton("Download Blip's brain (2 GB)"); dl.setAutoDefault(False)
-        dl.setEnabled(shutil.which("ollama") is not None)
-        if not dl.isEnabled():
-            dl.setToolTip("Install Ollama first")
-        dl.clicked.connect(self.download_brain)
-        row.addWidget(get); row.addWidget(dl)
-        self.root.insertLayout(self.root.count() - 1, row)
-        self.brain_help = (get, dl)
+        self.setup_go = QPushButton("Set it up for me"); self.setup_go.setObjectName("primary")
+        self.setup_go.setAutoDefault(False); self.setup_go.clicked.connect(self.run_setup)
+        self.setup_cancel = QPushButton("Cancel"); self.setup_cancel.setAutoDefault(False); self.setup_cancel.hide()
+        link = QPushButton("Get Ollama myself"); link.setAutoDefault(False)
+        link.clicked.connect(lambda: __import__("webbrowser").open("https://ollama.com/download"))
+        row.addWidget(self.setup_go); row.addWidget(self.setup_cancel); row.addWidget(link); row.addStretch()
+        lay.addLayout(row)
+        self.root.insertWidget(self.root.count() - 2, box)
+        self.brain_help = box
+        self.adjustSize()
 
-    def download_brain(self):
-        from PyQt6.QtCore import QProcess
-        from brain import PREFERRED_MODELS
-        self.brain_help[1].setEnabled(False)
-        self.pull = QProcess(self)
-        self.pull.setProcessChannelMode(QProcess.ProcessChannelMode.MergedChannels)
-        self.pull.readyRead.connect(self.pull_progress)
-        self.pull.finished.connect(lambda code, *_: self.add(
-            "note", "Brain downloaded! Say hi to me 😊" if code == 0 else "The download didn't finish. Try again later."))
-        self.pull.start("ollama", ["pull", PREFERRED_MODELS[0]])
-        self.add("note", "Downloading my brain… (about 2 GB, this can take a while)")
+    def run_setup(self):
+        import aisetup
+        self.setup = aisetup.Setup()
+        self.setup.progress.connect(self.setup_progress)
+        self.setup.finished.connect(self.setup_done)
+        self.setup_cancel.clicked.connect(self.setup.cancel)
+        self.setup_go.setEnabled(False); self.setup_cancel.show(); self.setup_bar.show()
+        self.setup.start()
 
-    def pull_progress(self):
-        import re
-        text = bytes(self.pull.readAll()).decode("utf-8", "replace")
-        pct = re.findall(r"(\d+)%", text)
-        if pct:
-            self.setWindowTitle(f"Chat with Blip: downloading {pct[-1]}%")
-            if self.lines and "Downloading my brain" in self.lines[-1]:
-                self.lines.pop()
-            self.add("note", f"Downloading my brain… {pct[-1]}%")
+    def setup_progress(self, msg, frac):
+        self.setup_label.setText(msg)
+        self.setup_bar.frac = max(0.0, frac) if frac >= 0 else 0.0
+        self.setup_bar.text = f"{frac * 100:.0f}%" if frac >= 0 else "…"
+        self.setup_bar.update()
+
+    def setup_done(self, ok, msg):
+        self.setup_cancel.hide()
+        self.setup_label.setText(msg)
+        if ok:
+            self.setup_bar.frac, self.setup_bar.text = 1.0, "Done"
+            self.setup_bar.update()
+            self.brain.model = None
+            self.add("blip", msg)
+            self.setup_go.hide()
+        else:
+            self.setup_go.setText("Retry"); self.setup_go.setEnabled(True)
 
     def on_learned(self, fact):
         self.add("note", f"💡 Blip will remember: {fact}")
@@ -1145,80 +1189,208 @@ def open_radio(pet):
 
 
 class RadioPanel(GlassDialog):
-    """Pick a station; Blip's helper plays it. Closing this panel keeps the music on."""
+    """Blip Radio: now playing, controls, volume + mute, stations / favourites / recent / search."""
+
+    TAB_STYLE = ("QTabWidget::pane{border:1px solid rgba(160,110,255,90);border-radius:8px}"
+                 "QTabBar::tab{background:rgba(255,255,255,14);color:#EAF6FF;padding:6px 12px;"
+                 "border-top-left-radius:6px;border-top-right-radius:6px;font:9pt 'Segoe UI'}"
+                 "QTabBar::tab:selected{background:rgba(0,225,255,60)}")
+    LIST_STYLE = ("QListWidget{background:rgba(10,8,24,150);color:#EAF6FF;border:none;"
+                  "font:10pt 'Segoe UI';padding:4px}QListWidget::item{padding:6px;border-radius:6px}"
+                  "QListWidget::item:selected{background:rgba(0,225,255,60)}"
+                  "QListWidget::item:hover{background:rgba(255,255,255,18)}")
 
     def __init__(self, pet):
-        from PyQt6.QtWidgets import QListWidget
-        super().__init__(f"{config.APP_NAME} Radio 📻")
+        from PyQt6.QtWidgets import QTabWidget
+        super().__init__(f"{config.APP_NAME} Radio")
         self.setWindowFlags(Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint
                             | Qt.WindowType.WindowStaysOnTopHint)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         self.pet, self.m = pet, pet.music
-        self.now = QLabel(); self.now.setWordWrap(True)
-        self.root.addWidget(self.now)
-        self.list = QListWidget()
-        self.list.setMinimumSize(300, 220)
-        self.list.setStyleSheet("QListWidget{background:rgba(10,8,24,150);color:#EAF6FF;"
-                                "border:1px solid rgba(160,110,255,110);border-radius:10px;"
-                                "font:10pt 'Segoe UI';padding:4px}"
-                                "QListWidget::item{padding:5px}"
-                                "QListWidget::item:selected{background:rgba(0,225,255,60)}")
-        for s in self.m.get_stations():
-            self.list.addItem(f"{s['name']}  ·  {s['genre']}")
-        self.list.itemDoubleClicked.connect(lambda _: self.play_selected())
-        self.root.addWidget(self.list)
+        # --- now playing card
+        self.card = NowPlayingCard()
+        self.root.addWidget(self.card)
+        # --- controls
         row = QHBoxLayout()
-        self.play_btn = QPushButton("▶ Play"); self.play_btn.setObjectName("primary")
-        self.play_btn.clicked.connect(self.play_pause)
-        nxt = QPushButton("⏭ Next"); nxt.clicked.connect(self.m.radio_next)
-        stop = QPushButton("⏹ Stop"); stop.clicked.connect(self.m.radio_stop)
-        for b in (self.play_btn, nxt, stop):
-            b.setAutoDefault(False)
+        self.prev_btn = self.round_btn("⏮", lambda: self.m.radio_next(-1))
+        self.play_btn = self.round_btn("▶", self.play_pause, big=True)
+        self.next_btn = self.round_btn("⏭", lambda: self.m.radio_next(1))
+        self.stop_btn = self.round_btn("⏹", self.m.radio_stop)
+        self.fav_btn = self.round_btn("☆", self.toggle_fav)
+        self.fav_btn.setToolTip("Add to favourites")
+        for b in (self.prev_btn, self.play_btn, self.next_btn, self.stop_btn, self.fav_btn):
             row.addWidget(b)
-        self.root.addLayout(row)
-        vol = QHBoxLayout()
-        vol.addWidget(QLabel("🔊"))
+        row.addSpacing(10)
+        self.mute_btn = self.round_btn("🔊", self.toggle_mute)
+        row.addWidget(self.mute_btn)
         self.vol = slider(0, 100, config.RADIO_VOLUME)
-        self.vol.valueChanged.connect(self.m.set_volume)
-        vol.addWidget(self.vol)
-        self.root.addLayout(vol)
+        self.vol.setMinimumWidth(130)
+        self.vol.valueChanged.connect(self.volume_changed)
+        row.addWidget(self.vol)
+        self.vol_label = QLabel(f"{config.RADIO_VOLUME}%"); self.vol_label.setFixedWidth(36)
+        row.addWidget(self.vol_label)
+        self.root.addLayout(row)
+        # --- tabs
+        self.tabs = QTabWidget(); self.tabs.setStyleSheet(self.TAB_STYLE)
+        self.lists = {}
+        for key, title in (("stations", "Stations"), ("favourites", "Favourites"), ("recent", "Recent")):
+            lw = self.make_list()
+            self.lists[key] = lw
+            self.tabs.addTab(lw, title)
+        self.tabs.addTab(self.make_search(), "Search")
+        self.tabs.setMinimumSize(420, 260)
+        self.root.addWidget(self.tabs)
         close = QPushButton("Close"); close.setAutoDefault(False); close.clicked.connect(self.close)
         self.root.addWidget(close, alignment=Qt.AlignmentFlag.AlignRight)
         self.add_credit()
+        self.fill_lists()
         self.m.radio_changed.connect(self.refresh)
         self.refresh()
         self.adjustSize()
         area = pet.current_screen().availableGeometry()
-        self.move(max(area.left() + 8, min(int(pet.x_pos) - 100, area.right() - self.width() - 8)),
+        self.move(max(area.left() + 8, min(int(pet.x_pos) - 150, area.right() - self.width() - 8)),
                   max(area.top() + 8, int(pet.y_pos) - self.height() - 6))
 
-    def play_selected(self):
-        row = self.list.currentRow()
-        if row >= 0:
-            self.m.radio_play(self.m.get_stations()[row])
+    # ---- building blocks
+    def round_btn(self, text, fn, big=False):
+        b = QPushButton(text); b.setAutoDefault(False)
+        size = 46 if big else 34
+        b.setFixedSize(size, size)
+        b.setStyleSheet("QPushButton{border-radius:%dpx;font:%dpt 'Segoe UI Symbol';padding:0;%s}"
+                        "QPushButton:hover{background:rgba(0,225,255,70)}" % (
+                            size // 2, 15 if big else 11,
+                            "background:qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #9a5aff,stop:1 #00e1ff);"
+                            "border:none;color:white" if big else ""))
+        b.clicked.connect(fn)
+        return b
+
+    def make_list(self):
+        from PyQt6.QtWidgets import QListWidget
+        lw = QListWidget(); lw.setStyleSheet(self.LIST_STYLE)
+        lw.itemDoubleClicked.connect(lambda it: self.play_item(it))
+        return lw
+
+    def make_search(self):
+        page = QWidget(); lay = QVBoxLayout(page); lay.setContentsMargins(6, 6, 6, 6)
+        row = QHBoxLayout()
+        self.q = QLineEdit(); self.q.setPlaceholderText("Station name (e.g. FM104, Spin, Capital)…")
+        self.q.returnPressed.connect(self.do_search)
+        self.country = QComboBox()
+        for label, code in (("Any country", ""), ("Ireland", "IE"), ("UK", "GB"), ("USA", "US"), ("Canada", "CA"),
+                            ("Australia", "AU"), ("Germany", "DE"), ("France", "FR"), ("Spain", "ES"), ("Netherlands", "NL")):
+            self.country.addItem(label, code)
+        self.genre = QComboBox()
+        for g in ("Any genre", "pop", "dance", "rock", "hip hop", "chillout", "jazz", "classical", "country",
+                  "80s", "90s", "talk", "news"):
+            self.genre.addItem(g)
+        go = QPushButton("Search"); go.setObjectName("primary"); go.setAutoDefault(False); go.clicked.connect(self.do_search)
+        row.addWidget(self.q); row.addWidget(self.country); row.addWidget(self.genre); row.addWidget(go)
+        lay.addLayout(row)
+        self.results = self.make_list()
+        lay.addWidget(self.results)
+        self.search_status = QLabel("Search thousands of real stations from around the world.")
+        self.search_status.setStyleSheet("color: rgba(234,246,255,150); font: 8pt 'Segoe UI';")
+        lay.addWidget(self.search_status)
+        return page
+
+    def add_stations(self, lw, stations, group=False):
+        from PyQt6.QtWidgets import QListWidgetItem
+        lw.clear()
+        last = None
+        for s_ in stations:
+            if group and s_.get("country") != last:
+                last = s_.get("country")
+                head = QListWidgetItem(f"  {last}")
+                head.setFlags(Qt.ItemFlag.NoItemFlags)
+                head.setForeground(QColor(0, 225, 255))
+                lw.addItem(head)
+            star = "★ " if self.m.is_favourite(s_) else ""
+            it = QListWidgetItem(f"{star}{s_['name']}    ·  {s_.get('genre', '')}"
+                                 + ("" if group else f"  ·  {s_.get('country', '')}"))
+            it.setData(Qt.ItemDataRole.UserRole, s_)
+            lw.addItem(it)
+        if not stations:
+            empty = QListWidgetItem("  Nothing here yet.")
+            empty.setFlags(Qt.ItemFlag.NoItemFlags)
+            lw.addItem(empty)
+
+    def fill_lists(self):
+        self.add_stations(self.lists["stations"], self.m.get_stations(), group=True)
+        self.add_stations(self.lists["favourites"], self.m.favourites())
+        self.add_stations(self.lists["recent"], self.m.recent())
+
+    # ---- actions
+    def play_item(self, it):
+        st = it.data(Qt.ItemDataRole.UserRole)
+        if st:
+            lw = it.listWidget()
+            self.m.play_list = [lw.item(i).data(Qt.ItemDataRole.UserRole) for i in range(lw.count())
+                                if lw.item(i).data(Qt.ItemDataRole.UserRole)]
+            self.m.radio_play(st)
+            self.fill_lists()
 
     def play_pause(self):
         if self.m.radio_on:
             self.m.play_pause()
-        elif self.list.currentRow() >= 0:
-            self.play_selected()
         else:
-            self.m.radio_play()
+            lw = self.tabs.currentWidget()
+            it = lw.currentItem() if hasattr(lw, "currentItem") else None
+            if it and it.data(Qt.ItemDataRole.UserRole):
+                self.play_item(it)
+            else:
+                self.m.radio_play()
+
+    def toggle_fav(self):
+        if self.m.station:
+            on = self.m.toggle_favourite(self.m.station)
+            self.pet.bubble.say("Radio", ("Added to" if on else "Removed from") + " favourites.", 2)
+            self.fill_lists()
+            self.refresh()
+
+    def toggle_mute(self):
+        muted = not getattr(self.m, "muted", False)
+        self.m.set_muted(muted)
+        self.mute_btn.setText("🔇" if muted else "🔊")
+
+    def volume_changed(self, v):
+        self.m.set_volume(v)
+        self.vol_label.setText(f"{v}%")
+        self.mute_btn.setText("🔊")
+
+    def do_search(self):
+        import threading
+        name, code = self.q.text().strip(), self.country.currentData()
+        tag = "" if self.genre.currentIndex() == 0 else self.genre.currentText()
+        self.search_status.setText("Searching…")
+        relay = _Relay(); relay.ready.connect(self.show_results); self._search_relay = relay
+
+        def work():
+            import music
+            try:
+                relay.ready.emit(music.search_stations(name, code, tag))
+            except Exception as e:
+                relay.ready.emit(e)
+        threading.Thread(target=work, daemon=True).start()
+
+    def show_results(self, res):
+        if isinstance(res, Exception):
+            self.search_status.setText("Couldn't reach the station directory. Try again in a moment.")
+            return
+        self.add_stations(self.results, res)
+        self.search_status.setText(f"{len(res)} stations found. Double-click to play, then ☆ to keep it.")
 
     def refresh(self):
         m = self.m
         if m.radio_on and m.station:
-            names = [s["name"] for s in m.get_stations()]
-            if m.station["name"] in names:
-                self.list.setCurrentRow(names.index(m.station["name"]))
-            state = "▶ Playing" if m.radio_playing else "⏸ Paused / connecting…"
-            song = f"\n♪ {m.radio_song}" if m.radio_song else ""
-            err = f"\n⚠ {m.radio_error}" if m.radio_error else ""
-            self.now.setText(f"{state}: {m.station['name']}{song}{err}")
-            self.play_btn.setText("⏸ Pause" if m.radio_playing else "▶ Play")
+            state = "LIVE" if m.radio_playing else ("Paused" if not m.radio_error else "Station offline")
+            self.card.set(m.station["name"], m.radio_song or m.station.get("genre", ""), state,
+                          m.station.get("country", ""), error=m.radio_error)
+            self.play_btn.setText("⏸" if m.radio_playing else "▶")
+            self.fav_btn.setText("★" if m.is_favourite(m.station) else "☆")
         else:
-            self.now.setText("Pick a station and press Play (or double-click it).")
-            self.play_btn.setText("▶ Play")
+            self.card.set("Blip Radio", "Pick a station and press play", "Off", "")
+            self.play_btn.setText("▶")
+            self.fav_btn.setText("☆")
 
     def closeEvent(self, e):
         try:
@@ -1229,6 +1401,56 @@ class RadioPanel(GlassDialog):
         self.pet.radio_panel = None
         super().closeEvent(e)
 
+
+class NowPlayingCard(QWidget):
+    """Big glassy 'now playing' card with a little equaliser."""
+
+    def __init__(self):
+        super().__init__()
+        self.setFixedHeight(84)
+        self.setMinimumWidth(420)
+        self.name, self.song, self.state, self.country, self.error = "Blip Radio", "", "Off", "", None
+        self.t0 = __import__("time").monotonic()
+        self.timer = QTimer(self); self.timer.timeout.connect(self.update)
+
+    def set(self, name, song, state, country, error=None):
+        self.name, self.song, self.state, self.country, self.error = name, song, state, country, error
+        if state == "LIVE":
+            self.timer.start(120)               # the equaliser moves only while playing
+        else:
+            self.timer.stop()
+        self.update()
+
+    def paintEvent(self, e):
+        import math
+        import time as _t
+        from PyQt6.QtGui import QFont
+        p = QPainter(self); p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        r = QRectF(self.rect()).adjusted(1, 1, -1, -1)
+        g = QLinearGradient(r.topLeft(), r.bottomRight())
+        g.setColorAt(0, QColor(110, 60, 220, 200)); g.setColorAt(1, QColor(0, 150, 200, 200))
+        p.setPen(QPen(QColor(255, 255, 255, 60), 1)); p.setBrush(QBrush(g))
+        p.drawRoundedRect(r, 14, 14)
+        # equaliser
+        t = _t.monotonic() - self.t0
+        p.setPen(Qt.PenStyle.NoPen); p.setBrush(QColor(255, 255, 255, 220))
+        for i in range(5):
+            h = 10 + (abs(math.sin(t * (3 + i) + i)) * 34 if self.state == "LIVE" else 4)
+            p.drawRoundedRect(QRectF(18 + i * 9, r.center().y() + 20 - h, 5, h), 2, 2)
+        f = QFont("Segoe UI"); f.setPixelSize(19); f.setBold(True); p.setFont(f)
+        p.setPen(QColor(255, 255, 255))
+        p.drawText(QRectF(76, 12, r.width() - 160, 26), Qt.AlignmentFlag.AlignVCenter, self.name)
+        f.setPixelSize(12); f.setBold(False); p.setFont(f); p.setPen(QColor(235, 245, 255, 220))
+        p.drawText(QRectF(76, 40, r.width() - 160, 34), Qt.AlignmentFlag.AlignVCenter | Qt.TextFlag.TextWordWrap,
+                   (self.song or "") + (f"   ·   {self.country}" if self.country else ""))
+        # LIVE / Paused badge
+        colour = {"LIVE": QColor(255, 60, 90), "Paused": QColor(120, 120, 150)}.get(self.state, QColor(90, 90, 110))
+        p.setBrush(colour); p.setPen(Qt.PenStyle.NoPen)
+        badge = QRectF(r.right() - 92, 14, 78, 22)
+        p.drawRoundedRect(badge, 11, 11)
+        f.setPixelSize(11); f.setBold(True); p.setFont(f); p.setPen(QColor(255, 255, 255))
+        p.drawText(badge, Qt.AlignmentFlag.AlignCenter, ("● " if self.state == "LIVE" else "") + self.state)
+        p.end()
 
 
 # ---------------------------------------------------------------------------
@@ -1468,6 +1690,9 @@ class MoreOptionsDialog(GlassDialog):
         self.root.addLayout(gm)
         self.props = QCheckBox("Morning coffee mug and nightcap")
         self.props.setChecked(config.TIME_PROPS)
+        self.ai = QCheckBox("AI chat (free chatting through Ollama on this PC)")
+        self.ai.setChecked(config.AI_CHAT)
+        self.root.addWidget(self.ai)
         self.clip = QCheckBox("Clipboard helper: copied colour codes and sums show in a bubble")
         self.clip.setChecked(config.CLIPBOARD_HELPER)
         note = QLabel("The clipboard helper only looks at what you copy while it's on, right on your PC.\n"
@@ -1495,6 +1720,7 @@ class MoreOptionsDialog(GlassDialog):
         config.DAILY_SUMMARY = self.summary.isChecked()
         config.TIME_PROPS = self.props.isChecked()
         config.CLIPBOARD_HELPER = self.clip.isChecked()
+        config.AI_CHAT = self.ai.isChecked()
         config.GAME_MODE = "Move" if self.game_mode.currentIndex() == 0 else "Hide"
         config.NIGHT_LIGHT_MODE = self.nl_mode.currentText()
         config.NIGHT_LIGHT_FROM = int(self.nl_from.currentText())

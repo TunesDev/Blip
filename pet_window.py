@@ -572,6 +572,10 @@ class PetWindow(QWidget):
                 self.music.stop_helper()
             return
         song, level, playing = self.music.update()
+        note = getattr(self.music, "note", None)
+        if note:
+            self.music.note = None
+            self.bubble.say(*note, 4)
         if playing != self.music_on:
             self.music_on = playing
             self.apply_fps()

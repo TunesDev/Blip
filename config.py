@@ -5,7 +5,7 @@ Developed by Tunes
 
 APP_NAME = "Blip"
 CREDIT = "Developed by Tunes"
-VERSION = "1.2.2"
+VERSION = "1.3.0"
 
 # --- Looks (change these in the Settings window, they get saved) ---
 CHARACTER = "Blob"        # Blob, Cat, Bunny, Ghost
@@ -149,7 +149,7 @@ XP_STREAK_MAX = 200          # ...up to this much
 UPDATE_REPO = "TunesDev/Blip"   # GitHub repo that hosts Blip's releases
 AUTO_UPDATE = True              # check at start + every 6 h, install updates automatically
 UPDATE_LAST = ""                # time of the last check
-LAST_VERSION = "1.2.2"               # to say "Updated to vX!" after an update
+LAST_VERSION = "1.3.0"               # to say "Updated to vX!" after an update
 FIRST_RUN_DONE = False          # the welcome window has been shown
 
 # --- v1.2: PC care, nudges, helpers ---
@@ -172,3 +172,6 @@ NIGHT_LIGHT_ACTIVE = False      # Blip changed the screen colours (put back on n
 
 # --- Games (v1.2.2) ---
 GAME_MODE = "Move"       # during fullscreen games: "Move" to another monitor (if there is one) or "Hide"
+
+# --- AI chat ---
+AI_CHAT = True           # free chatting through Ollama (the built-in commands always work)

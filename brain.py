@@ -129,8 +129,7 @@ class Brain(QObject):
             if self.model is None:
                 self.model = pick_model()
                 if self.model is None:
-                    self.failed.emit("I need my brain first! 🧠 Ask Claude to run "
-                                     "\"ollama pull llama3.2:3b\" (or run it yourself).")
+                    self.failed.emit("NO_BRAIN")
                     return
             messages = [{"role": "system", "content": system_prompt(self.mem)}]
             messages += self.mem["history"]
@@ -159,8 +158,7 @@ class Brain(QObject):
             self._learn(text)
         except (urllib.error.URLError, ConnectionError, TimeoutError):
             self.model = None
-            self.failed.emit("Zzz... my brain (Ollama) isn't running. 😴 Start Ollama "
-                             "from the Start menu, then talk to me again!")
+            self.failed.emit("NO_BRAIN")
         except Exception as e:
             self.failed.emit(f"Oops, my brain hiccuped: {e}")
         finally:
