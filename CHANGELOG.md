@@ -1,5 +1,26 @@
 # Changelog
 
+## 1.2.0
+
+- PC care (can be switched off): low disk space alert, weekly tidy-up (temp files + Recycle Bin, asks first),
+  weekly startup-apps check (switch off what you don't need, reversible), game boost (High performance during
+  games, switched back after), "restart helps" tip after 7 days, big RAM hog alert, weekly report
+- Wellbeing nudges every hour (tea, water, stretch, eyes, posture...), adjustable, quiet at night/while gaming
+- Achievements with a trophy shelf (16 to unlock, with bonus XP)
+- Snack-catch mini-game (Play menu)
+- Morning coffee mug and a nightcap when Blip sleeps at night
+- Clipboard helper (off by default): copied colour codes and sums show in a bubble
+- Evening summary of your day
+- Fix: hide and seek no longer gives Blip away with a bubble over his head
+- 9 new random antics: "oops, full auto" toy blaster, banana slip, bubble gum pop, giant dumbbell,
+  paper plane that bonks him, balloon ride, hot chili fire breath, skateboard wipeout, magic trick gone wrong
+- Power modes: say "power saving mode", "balanced" or "game mode" in the chat, or use the
+  Power & night light menu (Windows' own power plans, no admin)
+- Night light: Blip's own warm screen filter, on/off or on a schedule (default 21:00-07:00) with a warmth
+  slider; works on every monitor and puts normal colours back when switched off or when Blip closes
+- Hide and seek: more hiding spots (screen edges, peeking over the taskbar or over a window)
+- Lighter: smaller install (93 MB), less memory, fewer frames when idle, RAM checks only when RAM is really full
+
 ## 1.1.0
 
 - New glassy XP and happiness bars

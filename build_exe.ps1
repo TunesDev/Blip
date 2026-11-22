@@ -11,4 +11,9 @@
     --exclude-module PyQt6.QtPdf --exclude-module PyQt6.QtSql --exclude-module PyQt6.QtTest main.py
 # Software OpenGL (20 MB) is never used: Blip draws with plain 2D painting.
 Remove-Item dist\Blip\_internal\PyQt6\Qt6\bin\opengl32sw.dll -ErrorAction SilentlyContinue
+# Things Blip never uses: Qt's UI translations, extra image formats, SVG icons, network-status plugin
+$qt = "dist\Blip\_internal\PyQt6\Qt6"
+Remove-Item "$qt\translations" -Recurse -ErrorAction SilentlyContinue
+Remove-Item "$qt\plugins\iconengines", "$qt\plugins\networkinformation", "$qt\plugins\generic" -Recurse -ErrorAction SilentlyContinue
+Get-ChildItem "$qt\plugins\imageformats" -Exclude "qico.dll" -ErrorAction SilentlyContinue | Remove-Item -ErrorAction SilentlyContinue
 Write-Host "Done: dist\Blip\Blip.exe"

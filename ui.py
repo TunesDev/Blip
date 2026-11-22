@@ -113,6 +113,16 @@ def build_menu(pet, app) -> QMenu:
     menu.addMenu(dnd)
     menu.addAction("Chat with Blip…", lambda: open_chat(pet))
     menu.addAction("Help my PC…", lambda: open_helper(pet))
+    pcm = glass_menu(menu)
+    pcm.setTitle("Power && night light")
+    pcm.addAction("Power saver", lambda: pet.set_power_mode("saver"))
+    pcm.addAction("Balanced", lambda: pet.set_power_mode("balanced"))
+    pcm.addAction("High performance", lambda: pet.set_power_mode("high"))
+    pcm.addSeparator()
+    nl_on = pcm.addAction("Night light on", lambda: pet.set_night_light("On"))
+    nl_sched = pcm.addAction("Night light on a schedule", lambda: pet.set_night_light("Schedule"))
+    nl_off = pcm.addAction("Night light off", lambda: pet.set_night_light("Off"))
+    menu.addMenu(pcm)
 
     music = glass_menu(menu)
     music.setTitle("Music")
@@ -139,7 +149,9 @@ def build_menu(pet, app) -> QMenu:
     emotes = glass_menu(play)
     emotes.setTitle("Emotes")
     play.addMenu(emotes)
+    play.addAction("Snack catch (mini-game)", lambda: pet.trick("snackgame"))
     play.addAction("Prestige Shop…", lambda: ShopDialog(pet).exec())
+    play.addAction("Trophies…", lambda: TrophyDialog().exec())
     play.addAction("Surprise me!", lambda: pet.trick())
     play.addSeparator()
     focus_action = play.addAction("Focus 25 min", lambda: pet.stop_focus() if extras.focus_left() else pet.start_focus(25))
@@ -357,6 +369,9 @@ class SettingsDialog(GlassDialog):
         sk = QPushButton(f"Skins… ({prog.skin})"); sk.setAutoDefault(False)
         sk.clicked.connect(lambda: SkinsDialog(self.pet).exec())
         lvl.addWidget(sk)
+        more = QPushButton("More options…"); more.setAutoDefault(False)
+        more.clicked.connect(lambda: MoreOptionsDialog(self.pet).exec())
+        lvl.addWidget(more)
         shop_btn = QPushButton("Prestige Shop…"); shop_btn.setAutoDefault(False)
         shop_btn.clicked.connect(lambda: ShopDialog(self.pet).exec())
         lvl.addWidget(shop_btn)
@@ -684,6 +699,11 @@ class HelperPanel(GlassDialog):
     def close_ticked(self):
         import pchelper
         names = []
+        ticked = [a["name"] for i, a in enumerate(self.apps)
+                  if self.list.item(i).checkState() == Qt.CheckState.Checked and not a["windowed"]]
+        if ticked:
+            config.BOOST_APPS = sorted(set(config.BOOST_APPS) | set(ticked))[:10]
+            settings.save()
         for i, app in enumerate(self.apps):
             if self.list.item(i).checkState() == Qt.CheckState.Checked:
                 pchelper.close_app(app)
@@ -844,6 +864,10 @@ class ChatWindow(GlassDialog):
             self.pet.start_focus(max(1, min(mins, 180)))
             self.add("blip", f"Focus mode on for {mins} minutes 🎯 I'll stay quiet and tell you when it's break time.")
             return
+        pc = self.pc_command(text)
+        if pc:
+            self.add("blip", pc)
+            return
         radio = self.radio_command(text)
         if radio:
             self.add("blip", radio)
@@ -883,6 +907,25 @@ class ChatWindow(GlassDialog):
             self.pet.jump()
         except Exception as e:
             self.add("note", f"Couldn't open that app: {e}")
+
+    def pc_command(self, text):
+        """'power saving mode', 'balanced', 'game mode', 'night light on/off'"""
+        import re
+        low = text.lower()
+        if re.search(r"night ?light", low):
+            if re.search(r"\b(off|stop|disable)\b", low):
+                self.pet.set_night_light("Off"); return "Night light off."
+            if re.search(r"schedul|every night|automatic", low):
+                self.pet.set_night_light("Schedule")
+                return f"Night light will turn on at {config.NIGHT_LIGHT_FROM}:00 and off at {config.NIGHT_LIGHT_TO:02d}:00."
+            self.pet.set_night_light("On"); return "Night light on. Easier on your eyes tonight."
+        which = ("saver" if re.search(r"power sav|battery sav|eco mode|save power", low) else
+                 "high" if re.search(r"high performance|game mode|performance mode|max power", low) else
+                 "balanced" if re.search(r"\bbalanced\b", low) else None)
+        if which:
+            name = self.pet.set_power_mode(which)
+            return f"Switched to {name}." if name else "Hmm, that power plan isn't on this PC."
+        return None
 
     def birthday_command(self, text):
         import re, progress
@@ -1371,3 +1414,152 @@ class ShopDialog(GlassDialog):
         if self.pet.after_settings:
             self.pet.after_settings()
         self.refresh()
+
+
+# ---------------------------------------------------------------------------
+# v1.2 windows: more options, startup apps, trophies
+# ---------------------------------------------------------------------------
+class MoreOptionsDialog(GlassDialog):
+    def __init__(self, pet):
+        super().__init__("More options")
+        self.pet = pet
+        self.care = QCheckBox("PC care: disk alerts, weekly tidy-up, startup check, game boost, restart tips")
+        self.care.setChecked(config.PC_CARE)
+        self.nudges = QCheckBox("Wellbeing nudges (tea, water, stretch...)")
+        self.nudges.setChecked(config.NUDGES)
+        row = QHBoxLayout(); row.addWidget(self.nudges); row.addWidget(QLabel("every"))
+        self.every = QComboBox(); self.every.addItems(["30", "45", "60", "90", "120"])
+        self.every.setCurrentText(str(config.NUDGE_MINUTES)); row.addWidget(self.every)
+        row.addWidget(QLabel("min")); row.addStretch()
+        self.summary = QCheckBox("Evening summary of your day")
+        self.summary.setChecked(config.DAILY_SUMMARY)
+        nl = QHBoxLayout(); nl.addWidget(QLabel("Night light"))
+        self.nl_mode = QComboBox(); self.nl_mode.addItems(["Off", "On", "Schedule"])
+        self.nl_mode.setCurrentText(config.NIGHT_LIGHT_MODE); nl.addWidget(self.nl_mode)
+        self.nl_from = QComboBox(); self.nl_from.addItems([str(h) for h in range(17, 24)])
+        self.nl_from.setCurrentText(str(config.NIGHT_LIGHT_FROM))
+        self.nl_to = QComboBox(); self.nl_to.addItems([str(h) for h in range(4, 11)])
+        self.nl_to.setCurrentText(str(config.NIGHT_LIGHT_TO))
+        nl.addWidget(QLabel("from")); nl.addWidget(self.nl_from); nl.addWidget(QLabel("to")); nl.addWidget(self.nl_to)
+        nl.addWidget(QLabel("warmth")); self.nl_warm = slider(10, 100, config.NIGHT_LIGHT_WARMTH)
+        self.nl_warm.setMinimumWidth(100); nl.addWidget(self.nl_warm)
+        self.nl_games = QCheckBox("Off while gaming"); self.nl_games.setChecked(config.NIGHT_LIGHT_OFF_IN_GAMES)
+        nl.addWidget(self.nl_games)
+        self.root.addLayout(nl)
+        self.props = QCheckBox("Morning coffee mug and nightcap")
+        self.props.setChecked(config.TIME_PROPS)
+        self.clip = QCheckBox("Clipboard helper: copied colour codes and sums show in a bubble")
+        self.clip.setChecked(config.CLIPBOARD_HELPER)
+        note = QLabel("The clipboard helper only looks at what you copy while it's on, right on your PC.\n"
+                      "Nothing is saved or sent anywhere.")
+        note.setStyleSheet("color: rgba(234,246,255,150); font: 8pt 'Segoe UI';")
+        self.root.addWidget(self.care); self.root.addLayout(row)
+        for w in (self.summary, self.props, self.clip, note):
+            self.root.addWidget(w)
+        tools = QHBoxLayout()
+        b1 = QPushButton("Startup apps…"); b1.clicked.connect(lambda: StartupDialog(pet).exec())
+        b2 = QPushButton("Trophies…"); b2.clicked.connect(lambda: TrophyDialog().exec())
+        b3 = QPushButton("Tidy up now"); b3.clicked.connect(lambda: (pet.tidy_up(), self.accept()))
+        for b in (b1, b2, b3):
+            b.setAutoDefault(False); tools.addWidget(b)
+        self.root.addLayout(tools)
+        save = QPushButton("Save"); save.setObjectName("primary"); save.setAutoDefault(False)
+        save.clicked.connect(self.save)
+        self.root.addWidget(save, alignment=Qt.AlignmentFlag.AlignRight)
+        self.add_credit()
+
+    def save(self):
+        config.PC_CARE = self.care.isChecked()
+        config.NUDGES = self.nudges.isChecked()
+        config.NUDGE_MINUTES = int(self.every.currentText())
+        config.DAILY_SUMMARY = self.summary.isChecked()
+        config.TIME_PROPS = self.props.isChecked()
+        config.CLIPBOARD_HELPER = self.clip.isChecked()
+        config.NIGHT_LIGHT_MODE = self.nl_mode.currentText()
+        config.NIGHT_LIGHT_FROM = int(self.nl_from.currentText())
+        config.NIGHT_LIGHT_TO = int(self.nl_to.currentText())
+        config.NIGHT_LIGHT_WARMTH = self.nl_warm.value()
+        config.NIGHT_LIGHT_OFF_IN_GAMES = self.nl_games.isChecked()
+        settings.save()
+        self.pet.night_light_tick(__import__("time").monotonic(), force=True)
+        self.accept()
+
+
+class StartupDialog(GlassDialog):
+    """Apps that start with Windows. Untick to switch off (your own ones only), reversible."""
+
+    def __init__(self, pet):
+        from PyQt6.QtWidgets import QListWidget, QListWidgetItem
+        import care
+        super().__init__("Startup apps")
+        self.pet = pet
+        self.root.addWidget(QLabel("These start when Windows starts. Untick the ones you don't need,\n"
+                                   "then press Apply. You can turn them all back on later."))
+        self.list = QListWidget(); self.list.setMinimumSize(440, 260)
+        self.list.setStyleSheet("QListWidget{background:rgba(10,8,24,150);color:#EAF6FF;border:1px solid "
+                                "rgba(160,110,255,110);border-radius:10px;font:10pt 'Segoe UI';padding:4px}"
+                                "QListWidget::item{padding:4px}")
+        self.apps = care.startup_apps()
+        for name, value, where, editable in self.apps:
+            it = QListWidgetItem(f"{name}   ·   {where}")
+            if editable:
+                it.setFlags(it.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+                it.setCheckState(Qt.CheckState.Checked)
+            else:
+                it.setFlags(Qt.ItemFlag.ItemIsEnabled)
+                it.setForeground(QColor(234, 246, 255, 110))
+            self.list.addItem(it)
+        self.root.addWidget(self.list)
+        row = QHBoxLayout()
+        back = QPushButton("Turn back on what Blip switched off"); back.clicked.connect(self.restore)
+        apply = QPushButton("Apply"); apply.setObjectName("primary"); apply.clicked.connect(self.apply)
+        close = QPushButton("Close"); close.clicked.connect(self.accept)
+        for b in (back, close, apply):
+            b.setAutoDefault(False); row.addWidget(b)
+        self.root.addLayout(row)
+        self.add_credit()
+
+    def apply(self):
+        import care
+        off = [a for i, a in enumerate(self.apps)
+               if a[3] and self.list.item(i).checkState() == Qt.CheckState.Unchecked]
+        if not off:
+            self.accept(); return
+        if ConfirmDialog("Switch off?", "Stop these starting with Windows?\n" + "\n".join("  " + a[0] for a in off),
+                         yes="Switch off", no="Cancel").exec():
+            care.disable_startup(off)
+            self.pet.bubble.say("Startup apps", f"Switched off {len(off)} startup app(s).", 4)
+            self.accept()
+
+    def restore(self):
+        import care
+        n = care.restore_startup()
+        self.pet.bubble.say("Startup apps", f"Turned {n} app(s) back on." if n else "Nothing to turn back on.", 4)
+        self.accept()
+
+
+class TrophyDialog(GlassDialog):
+    def __init__(self):
+        from PyQt6.QtWidgets import QGridLayout
+        import care, progress
+        super().__init__("Trophies")
+        prog = progress.get()
+        got = set(getattr(prog, "achievements", []))
+        stats = getattr(prog, "stats", {})
+        self.root.addWidget(QLabel(f"{len(got)} of {len(care.ACHIEVEMENTS)} unlocked"))
+        grid = QGridLayout(); grid.setSpacing(8)
+        for i, (aid, name, desc, counter, target, bonus) in enumerate(care.ACHIEVEMENTS):
+            done = aid in got
+            have = min(stats.get(counter, 0), target)
+            lab = QLabel(("🏆 " if done else "🔒 ") + f"<b>{name}</b><br><span style='font-size:8pt'>{desc}"
+                         + ("" if done else f" ({have}/{target})") + "</span>")
+            lab.setStyleSheet("QLabel{background:rgba(255,255,255,%d);border:1px solid rgba(160,110,255,90);"
+                              "border-radius:8px;padding:6px;color:%s}" % (24 if done else 8,
+                                                                             "#FFF2B0" if done else "rgba(234,246,255,150)"))
+            lab.setFixedWidth(210)
+            grid.addWidget(lab, i // 3, i % 3)
+        self.root.addLayout(grid)
+        close = QPushButton("Close"); close.setObjectName("primary"); close.setAutoDefault(False)
+        close.clicked.connect(self.accept)
+        self.root.addWidget(close, alignment=Qt.AlignmentFlag.AlignRight)
+        self.add_credit()

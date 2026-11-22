@@ -5,7 +5,7 @@ Developed by Tunes
 
 APP_NAME = "Blip"
 CREDIT = "Developed by Tunes"
-VERSION = "1.1.0"
+VERSION = "1.2.0"
 
 # --- Looks (change these in the Settings window, they get saved) ---
 CHARACTER = "Blob"        # Blob, Cat, Bunny, Ghost
@@ -21,7 +21,7 @@ WALK_SPEED = 55
 
 # Frames per second for each state. Lower = less CPU.
 FPS_WALK = 24
-FPS_IDLE = 8
+FPS_IDLE = 6
 FPS_SLEEP = 2
 FPS_PHYSICS = 60          # only while being dragged / flying through the air
 FPS_HIDDEN = 1            # while hidden behind a fullscreen game
@@ -138,6 +138,9 @@ XP_SOURCES = {
     "jump": (3, 10),         # double-click jumps
     "happy": (100, 1),       # keeping Blip's happiness above 70
     "first_chat": (50, 1),   # first chat of the day
+    "nudge": (10, 6),        # following a wellbeing nudge
+    "snackgame": (0, 3),     # the snack-catch mini-game (XP = snacks caught x 5)
+    "tidy": (40, 2),         # cleaning up your PC with Blip
 }
 XP_STREAK_BONUS = 20         # extra XP per day of streak...
 XP_STREAK_MAX = 200          # ...up to this much
@@ -146,5 +149,23 @@ XP_STREAK_MAX = 200          # ...up to this much
 UPDATE_REPO = "TunesDev/Blip"   # GitHub repo that hosts Blip's releases
 AUTO_UPDATE = True              # check at start + every 6 h, install updates automatically
 UPDATE_LAST = ""                # time of the last check
-LAST_VERSION = "1.1.0"               # to say "Updated to vX!" after an update
+LAST_VERSION = "1.2.0"               # to say "Updated to vX!" after an update
 FIRST_RUN_DONE = False          # the welcome window has been shown
+
+# --- v1.2: PC care, nudges, helpers ---
+PC_CARE = True           # disk alert, startup apps, game boost, weekly tidy-up, restart nudge
+NUDGES = True            # wellbeing nudges ("Fancy a cup of tea?")
+NUDGE_MINUTES = 60       # ...every this many active minutes
+CLIPBOARD_HELPER = False # copied colour codes / sums -> a bubble (nothing is stored or sent)
+DAILY_SUMMARY = True     # evening summary bubble
+TIME_PROPS = True        # morning coffee mug, nightcap when sleeping at night
+BOOST_APPS = []          # apps you ticked in Help my PC (game boost may close these, if you say yes)
+CARE_STATE = {}          # last dates for the weekly / daily care checks
+
+# --- Night light (Blip's own warm screen filter) + power modes ---
+NIGHT_LIGHT_MODE = "Off"        # Off, On, Schedule
+NIGHT_LIGHT_FROM = 21           # schedule: from 21:00...
+NIGHT_LIGHT_TO = 7              # ...to 07:00
+NIGHT_LIGHT_WARMTH = 50         # 0-100
+NIGHT_LIGHT_OFF_IN_GAMES = False
+NIGHT_LIGHT_ACTIVE = False      # Blip changed the screen colours (put back on next start if needed)

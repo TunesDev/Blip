@@ -114,6 +114,9 @@ def cheer(kind):
     """Something nice happened. Pokes etc. are capped per day so it can't be spammed."""
     try:
         import progress
+        if kind == "focus":
+            d = progress.get().daily
+            d["focus"] = d.get("focus", 0) + 1
         events = progress.get().award(XP_FOR.get(kind, kind))
         if events and on_xp:
             on_xp(events)

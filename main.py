@@ -105,6 +105,14 @@ def main():
           f"(screen: {pet.current_screen().name()}). Tray icon: bottom-right, maybe under ^.")
     print("Press Ctrl+C here to quit.", flush=True)
 
+    def restore_screen():                 # normal colours when Blip closes
+        if config.NIGHT_LIGHT_ACTIVE:
+            import nightlight
+            nightlight.restore()
+    app.aboutToQuit.connect(restore_screen)
+    if config.NIGHT_LIGHT_ACTIVE or config.NIGHT_LIGHT_MODE != "Off":
+        QTimer.singleShot(2000, lambda: pet.night_light_tick(__import__("time").monotonic(), force=True))
+
     sys.exit(app.exec())
 
 

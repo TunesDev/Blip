@@ -35,12 +35,15 @@ class Bubble(QWidget):
         self.until = 0.0
         self.shown_at = 0.0
 
-    def say(self, title, text, seconds=6.0):
+    def say(self, title, text, seconds=6.0, swatch=None):
+        self.swatch = swatch                         # (r, g, b) for the clipboard colour helper
         title, text = plain(title), plain(text)
         fm = QFontMetrics(self.font)
         self.title = title
         self.text = fm.elidedText(text, Qt.TextElideMode.ElideRight, MAX_TEXT_WIDTH)
         w = max(fm.horizontalAdvance(self.text), QFontMetrics(self.small).horizontalAdvance(title))
+        if swatch:
+            w += 30
         self.setFixedSize(w + PAD_X * 2 + 2, fm.height() * 2 + PAD_Y * 2 + TAIL)
         self.shown_at = time.monotonic()
         self.until = self.shown_at + seconds
@@ -81,6 +84,10 @@ class Bubble(QWidget):
         p.setBrush(QColor(30, 18, 56, 228))
         p.setPen(QPen(QColor(160, 110, 255, 200), 1.2))
         p.drawPath(path)
+        if getattr(self, "swatch", None):
+            p.setPen(QPen(QColor(255, 255, 255, 200), 1))
+            p.setBrush(QColor(*self.swatch))
+            p.drawRoundedRect(QRectF(self.width() - PAD_X - 22, PAD_Y + 4, 22, 22), 5, 5)
         p.setPen(QColor(0, 225, 255, 230))
         p.setFont(self.small)
         fm = QFontMetrics(self.font)

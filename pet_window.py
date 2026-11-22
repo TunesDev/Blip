@@ -468,6 +468,9 @@ class PetWindow(QWidget):
             self.pending_say = None
         if getattr(self, "pending_update", None):
             self.finish_update()
+        if getattr(self, "pending_xp", None):
+            ev, self.pending_xp = self.pending_xp, None
+            self.handle_xp(ev)
         pop = getattr(self, "xp_popup", None)
         if pop is not None:
             if pop.alive():
@@ -643,6 +646,7 @@ class PetWindow(QWidget):
         """Every 6 s (same check as CPU/RAM): game buddy, the odd question, antics."""
         self.maybe_antic(now)
         self.maybe_check_updates(now)
+        self.night_light_tick(now)
         if user_idle_seconds() < 60 and not self.paused_now():
             import progress
             prog = progress.get()
@@ -657,18 +661,21 @@ class PetWindow(QWidget):
             if ev:
                 self.handle_xp(ev)
             self.maybe_offer_seek(now)
+            self.care_tick(now)
         import buddy
         titles = [t for _, t in desktop.window_titles()]
         game = buddy.game_title(titles)
         if game:
             if self.game is None:
                 self.game, self.game_start = game, now
+                self.offer_game_boost(game)
             self.game_gone = 0
         elif self.game is not None:
             self.game_gone += 1
             if self.game_gone >= 2:                       # gone for ~12 s: match over
                 played = now - self.game_start
                 finished, self.game = self.game, None
+                self.end_game_boost()
                 min_play = 5 if __import__("os").getenv("BLIP_DEBUG_GAME") else buddy.MIN_PLAY
                 if played >= min_play and config.GAME_BUDDY and not __import__("extras").dnd_on():
                     self.ask_match(finished)
@@ -1210,6 +1217,8 @@ class PetWindow(QWidget):
                 p.drawEllipse(QPointF((60 + side * 22) * k, 86 * k), 6 * k, 3.5 * k)
         import progress
         prog = progress.get()
+        if config.TIME_PROPS:
+            self.paint_time_props(p, k, t)
         if prog.aura and prog.prestige and self.state != "sleep":
             import skins
             skins.paint_aura(p, prog.prestige, QPointF(60 * k, 78 * k), 46 * k, t)
@@ -1373,6 +1382,243 @@ class PetWindow(QWidget):
         from PyQt6.QtWidgets import QApplication
         QTimer.singleShot(1500, QApplication.instance().quit)
 
+    # ---------- v1.2: PC care, nudges, summary, time props ----------------------------------
+    def care_ok(self):
+        import extras
+        return (not self.hidden_for_game and not extras.dnd_on() and extras.focus_left() <= 0
+                and self.state != "sleep" and self.ask is None and self.chat is None
+                and self.antic is None and self.game is None)
+
+    def care_tick(self, now):
+        before = dict(config.CARE_STATE)
+        self._care_tick(now)
+        if config.CARE_STATE != before:                   # remember what was shown / asked
+            __import__("settings").save()
+
+    def _care_tick(self, now):
+        """Every 6 s while you're active; the actual checks run every few minutes."""
+        import datetime as dt
+        st = config.CARE_STATE
+        today = dt.date.today().isoformat()
+        hour = dt.datetime.now().hour
+        # hourly wellbeing nudges
+        if config.NUDGES:
+            self.nudge_secs = getattr(self, "nudge_secs", 0) + 6
+            if self.nudge_secs >= config.NUDGE_MINUTES * 60 and 8 <= hour < 23 and self.care_ok():
+                self.nudge_secs = 0
+                self.show_nudge()
+                return
+        # evening summary
+        if config.DAILY_SUMMARY and hour >= 20 and st.get("summary") != today and self.care_ok():
+            st["summary"] = today
+            self.show_summary()
+            return
+        if not hasattr(self, "next_care"):
+            self.next_care = now + 1800                   # first PC check 30 min after start
+        if not config.PC_CARE or now < self.next_care or not self.care_ok():
+            return
+        self.next_care = now + 600                        # PC checks: every 10 minutes at most
+        import care
+        full, free_gb = care.disk_full_percent()
+        if full >= 90 and st.get("disk") != today:
+            st["disk"] = today
+            self.ask_bubble(f"Your C: drive is {full:.0f}% full ({free_gb:.1f} GB free). Clean temp files?",
+                            self.tidy_up, yes="Clean up", no="Not now", seconds=30)
+            return
+        if care.uptime_days() >= 7 and st.get("restart") != today:
+            st["restart"] = today
+            self.bubble.say("Restart tip", "Your PC has been on for 7+ days. A restart keeps it snappy!", 8)
+            return
+        week = "%d-W%02d" % dt.date.today().isocalendar()[:2]
+        if st.get("tidy_week") != week:
+            st["tidy_week"] = week
+            freed = st.get("freed_mb", 0)
+            if freed:
+                self.bubble.say("Weekly report", f"Last week I helped free {freed / 1024:.1f} GB. Nice!", 6)
+                st["freed_mb"] = 0
+            self.ask_bubble("Weekly tidy-up? I'll clean old temp files and empty the Recycle Bin.",
+                            self.tidy_up, yes="Tidy up", no="Skip", seconds=30)
+            return
+        if st.get("startup_week") != week:
+            st["startup_week"] = week
+            from ui import StartupDialog
+            self.ask_bubble("Want to check which apps start with Windows? Fewer = faster boot.",
+                            lambda: StartupDialog(self).exec(), yes="Show me", no="Not now", seconds=30)
+            return
+        self.check_ram_hog(today)
+
+    def check_ram_hog(self, today):
+        try:
+            import psutil
+            vm = psutil.virtual_memory()
+            if vm.percent < 85:                            # only look closer when RAM is really full
+                return
+            total = vm.total
+            best = None
+            for p_ in psutil.process_iter(["name", "memory_info"]):
+                mi = p_.info.get("memory_info")
+                if mi and (best is None or mi.rss > best[1]):
+                    best = (p_.info.get("name") or "?", mi.rss)
+            if best and best[1] > total * 0.35:
+                key = "hog_" + best[0]
+                if config.CARE_STATE.get(key) != today:
+                    config.CARE_STATE[key] = today
+                    from ui import open_helper
+                    self.ask_bubble(f"{best[0]} is using {best[1] / 1073741824:.1f} GB of RAM. Have a look?",
+                                    lambda: open_helper(self), yes="Show me", no="It's fine", seconds=25)
+        except Exception:
+            pass
+
+    def tidy_up(self):
+        import threading
+
+        def work():
+            import pchelper, ctypes
+            mb = pchelper.clean_temp()
+            try:                                           # Recycle Bin (you said yes)
+                class Q(ctypes.Structure):
+                    _fields_ = [("cbSize", ctypes.c_ulong), ("i64Size", ctypes.c_longlong),
+                                ("i64NumItems", ctypes.c_longlong)]
+                q = Q(); q.cbSize = ctypes.sizeof(Q)
+                sh = ctypes.WinDLL("shell32")
+                sh.SHQueryRecycleBinW(None, ctypes.byref(q))
+                if q.i64NumItems:
+                    sh.SHEmptyRecycleBinW(None, None, 0x7)  # no confirm / progress / sound
+                    mb += q.i64Size / 1048576
+            except Exception:
+                pass
+            config.CARE_STATE["freed_mb"] = config.CARE_STATE.get("freed_mb", 0) + int(mb)
+            self.pending_say = ("All tidy!", f"Freed about {mb:,.0f} MB.")
+            import progress, care
+            prog = progress.get()
+            self.pending_xp = prog.award("tidy")
+        self.bubble.say("Tidying up", "Cleaning temp files and the Recycle Bin…", 4)
+        threading.Thread(target=work, daemon=True).start()
+
+    def offer_game_boost(self, game):
+        if not config.PC_CARE or __import__("extras").dnd_on():
+            return
+        import pchelper
+        plans = pchelper.power_plans()
+        fast = next((g for g, n, a in plans if "ultimate" in n.lower()), None) or \
+            next((g for g, n, a in plans if "high" in n.lower()), None)
+        active = next((g for g, n, a in plans if a), None)
+        if not fast or fast == active and not config.BOOST_APPS:
+            return
+
+        def boost():
+            self.boost_restore = active
+            if fast and fast != active:
+                pchelper.set_power_plan(fast)
+            closed = []
+            for app in pchelper.top_apps(limit=40):
+                if app["name"] in config.BOOST_APPS and not app["windowed"]:
+                    pchelper.close_app(app)
+                    closed.append(app["name"])
+            self.pending_say = ("Boost on!", "High performance on" + (f", closed {', '.join(closed)}" if closed else "")
+                                + ". I'll switch back after your game.")
+        extra = f" and close {', '.join(config.BOOST_APPS[:3])}" if config.BOOST_APPS else ""
+        self.ask_bubble(f"Game time! Switch to High performance{extra}?", lambda: __import__("threading").Thread(
+            target=boost, daemon=True).start(), yes="Boost!", no="No thanks", seconds=20)
+
+    def end_game_boost(self):
+        guid = getattr(self, "boost_restore", None)
+        if guid:
+            self.boost_restore = None
+            import pchelper
+            pchelper.set_power_plan(guid)
+            self.bubble.say("Boost off", "Power plan switched back.", 3)
+
+    def show_nudge(self):
+        import care
+        last = getattr(self, "last_nudge", None)
+        text = care.pick_nudge()
+        while text == last and len(care.NUDGES) > 1:
+            text = care.pick_nudge()
+        self.last_nudge = text
+
+        def done():
+            import progress
+            prog = progress.get()
+            self.handle_xp(prog.award("nudge"))
+            self.set_expr("happy", 2)
+        self.ask_bubble(text, done, yes="Done!", no="Later", seconds=30)
+
+    def show_summary(self):
+        import progress
+        prog = progress.get()
+        secs = prog.daily.get("active_secs", 0)
+        quests = sum(1 for _, _, d in prog.today_quests() if d)
+        focus = prog.daily.get("focus", 0)
+        self.bubble.say("Today with Blip", f"{int(secs // 3600)}h {int(secs % 3600 // 60)}m at the PC · "
+                        f"{focus} focus · {quests}/3 quests · +{prog.daily.get('xp', 0)} XP", 10)
+
+    def paint_time_props(self, p, k, t):
+        from PyQt6.QtGui import QColor, QPen
+        from PyQt6.QtCore import QPointF, QRectF
+        h = __import__("datetime").datetime.now().hour
+        if 6 <= h < 11 and self.state == "idle" and not self.music_on and self.antic is None:
+            x, y = 96 * k, 92 * k                        # morning coffee mug
+            p.setPen(QPen(QColor(255, 255, 255, 200), 1.2 * k))
+            p.setBrush(QColor(240, 240, 250))
+            p.drawRoundedRect(QRectF(x - 6 * k, y - 8 * k, 12 * k, 13 * k), 2 * k, 2 * k)
+            p.setBrush(QColor(0, 0, 0, 0))
+            p.drawArc(QRectF(x + 4 * k, y - 5 * k, 6 * k, 7 * k), -90 * 16, 180 * 16)
+            p.setPen(QPen(QColor(255, 255, 255, 120), 1 * k))
+            for i in range(2):                            # steam
+                sx = x - 2 * k + i * 4 * k
+                p.drawLine(QPointF(sx + __import__("math").sin(t * 3 + i) * 1.5 * k, y - 11 * k),
+                           QPointF(sx, y - 16 * k))
+        elif self.state == "sleep" and (h >= 23 or h < 6):
+            from PyQt6.QtGui import QPolygonF          # nightcap
+            p.setPen(QColor(0, 0, 0, 0))
+            p.setBrush(QColor(60, 80, 200, 230))
+            p.drawPolygon(QPolygonF([QPointF(36 * k, 58 * k), QPointF(70 * k, 40 * k), QPointF(84 * k, 58 * k)]))
+            p.setBrush(QColor(255, 255, 255))
+            p.drawEllipse(QPointF(72 * k, 40 * k), 4 * k, 4 * k)
+
+    # ---------- night light + power modes ------------------------------------------------
+    def night_light_tick(self, now, force=False):
+        if config.NIGHT_LIGHT_MODE == "Off" and not config.NIGHT_LIGHT_ACTIVE and not force:
+            return                                       # nothing to do: no code runs
+        import datetime as dt, nightlight
+        n = dt.datetime.now()
+        want = nightlight.should_be_on(n.hour, n.minute, self.hidden_for_game)
+        is_on = config.NIGHT_LIGHT_ACTIVE
+        if want and (not is_on or force or now >= getattr(self, "nl_refresh", 0)):
+            self.nl_refresh = now + 300                  # re-apply now and then (Windows can reset it)
+            if not nightlight.turn_on():
+                config.NIGHT_LIGHT_MODE = "Off"
+                self.bubble.say("Night light", "This screen won't take my filter. I opened Windows' Night light.", 6)
+        elif not want and is_on:
+            nightlight.restore()
+
+    def set_night_light(self, mode):
+        config.NIGHT_LIGHT_MODE = mode
+        __import__("settings").save()
+        self.night_light_tick(time.monotonic(), force=True)
+        msg = {"On": "Night light on. Easier on the eyes!", "Off": "Night light off.",
+               "Schedule": f"Night light will come on {config.NIGHT_LIGHT_FROM}:00-{config.NIGHT_LIGHT_TO:02d}:00."}[mode]
+        self.bubble.say("Night light", msg, 3)
+
+    def set_power_mode(self, which):
+        """which: 'saver', 'balanced' or 'high'. Uses Windows' own power plans (no admin)."""
+        import pchelper
+        plans = pchelper.power_plans()
+        want = {"saver": ("power saver", "eco"), "balanced": ("balanced",),
+                "high": ("ultimate", "high performance")}[which]
+        pick = None
+        for key in want:
+            pick = next(((g, n) for g, n, a in plans if key in n.lower()), None)
+            if pick:
+                break
+        if not pick:
+            self.bubble.say("Power mode", "That power plan isn't on this PC.", 4)
+            return None
+        pchelper.set_power_plan(pick[0])
+        self.bubble.say("Power mode", f"Switched to {pick[1]}.", 3)
+        return pick[1]
+
     def paused_now(self):
         return getattr(self, "paused", False)
 
@@ -1400,6 +1646,12 @@ class PetWindow(QWidget):
 
     def handle_xp(self, events):
         import extras
+        for ev in events:
+            if ev[0] == "achievement":
+                self.bubble.say("Achievement unlocked!", f"{ev[1]}: {ev[2]}", 5)
+                self.confetti_until = time.monotonic() + 3
+                extras.play("yay")
+        events = [e for e in events if e[0] != "achievement"]
         gain = sum(ev[1] for ev in events if ev[0] == "xp")
         if gain:
             self.show_xp_popup(gain)
@@ -1486,6 +1738,12 @@ class PetWindow(QWidget):
     def screenshot_pose(self):
         from PyQt6.QtWidgets import QApplication
         md = QApplication.clipboard().mimeData()
+        if config.CLIPBOARD_HELPER and md is not None and md.hasText() and not md.hasImage():
+            import care
+            info = care.clipboard_info(md.text())     # read here, never stored or sent
+            if info:
+                self.bubble.say(info[0], info[1], 6, swatch=info[2])
+            return
         if md is not None and md.hasImage() and self.antic is None and self.state in ("idle", "walk") \
                 and not self.paused_now():
             self.start_antic("pose")

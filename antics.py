@@ -559,11 +559,29 @@ class HideSeek(Antic):
     def __init__(self, pet):
         super().__init__(pet)
         area = pet.ground_area()
-        self.side = random.choice((-1, 1))
         size = config.PET_SIZE
-        self.x = area.left() - size * 0.55 if self.side < 0 else area.right() - size * 0.45
+        spot = random.choice(["left", "right", "bottom", "bottom", "window"])
+        self.side = random.choice((-1, 1))
         self.y = random.uniform(area.top() + 80, area.bottom() - size - 120)
-        pet.facing = -self.side
+        if spot == "left":
+            self.side = -1
+            self.x = area.left() - size * random.uniform(0.5, 0.65)
+        elif spot == "right":
+            self.side = 1
+            self.x = area.right() - size * random.uniform(0.35, 0.5)
+        elif spot == "bottom":                            # just his head peeking over the taskbar
+            self.x = random.uniform(area.left() + 40, area.right() - size - 40)
+            self.y = area.bottom() - size * random.uniform(0.35, 0.45)
+        else:                                              # peeking over the top of a window
+            spots = pet.find_spots(force=True)
+            if spots:
+                _, a, b, top = random.choice(spots)
+                self.x = random.uniform(a, max(a, b - size))
+                self.y = top - size * random.uniform(0.25, 0.35)
+            else:
+                self.x = area.left() - size * 0.55
+                self.side = -1
+        pet.facing = -self.side if spot in ("left", "right") else random.choice((-1, 1))
         self.found = False
         self.fall_at_end = True
         pet.bubble.say("Hide and seek!", "Find me within 30 seconds... ready or not!", 3)
@@ -573,6 +591,11 @@ class HideSeek(Antic):
         if self.t < 0.6:                                   # zoom off to the hiding spot
             return False
         self.pet.x_pos, self.pet.y_pos = self.x, self.y
+        if not self.found:                                 # no bubble or XP tag giving him away
+            self.pet.bubble.hide()
+            pop = getattr(self.pet, "xp_popup", None)
+            if pop is not None:
+                pop.hide()
         if self.found:
             return True
         if self.t >= self.duration:
@@ -646,6 +669,103 @@ class Emote(Antic):
                 f = QFont("Segoe UI", 1); f.setBold(True); f.setPixelSize(int(11 * k)); p.setFont(f)
                 p.setPen(rgba(THEMES.get(config.THEME, THEMES["Nexus"])[1], 240))
                 p.drawText(QPointF(70 * k, 30 * k), "HA HA")
+
+
+class SnackGameWindow(QWidget):
+    """See-through strip over the screen where snacks fall. Clicks go through it."""
+
+    def __init__(self, rect):
+        super().__init__()
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint
+                            | Qt.WindowType.Tool | Qt.WindowType.WindowDoesNotAcceptFocus
+                            | Qt.WindowType.WindowTransparentForInput)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
+        self.setGeometry(rect)
+        self.snacks, self.score, self.left = [], 0, 20.0
+
+    def paintEvent(self, e):
+        from character import draw_snack
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        for x, y, _ in self.snacks:
+            p.save(); p.translate(x - 14, y - 14); draw_snack(p, 28); p.restore()
+        from PyQt6.QtGui import QFont
+        f = QFont("Segoe UI", 1); f.setBold(True); f.setPixelSize(18); p.setFont(f)
+        p.setPen(QColor(0, 0, 0, 0)); p.setBrush(QColor(25, 16, 50, 200))
+        p.drawRoundedRect(QRectF(self.width() / 2 - 120, 6, 240, 30), 12, 12)
+        p.setPen(QColor(240, 250, 255))
+        p.drawText(QRectF(self.width() / 2 - 120, 6, 240, 30), Qt.AlignmentFlag.AlignCenter,
+                   f"Snacks: {self.score}    Time: {max(0, int(self.left))}s")
+        p.end()
+
+
+class SnackGame(Antic):
+    """Mini-game: move your mouse to steer Blip and catch the falling snacks (20 s)."""
+    margin = 0
+    duration = 21.0
+    walking_ok = True
+
+    def __init__(self, pet):
+        super().__init__(pet)
+        area = pet.ground_area()
+        from PyQt6.QtCore import QRect
+        self.top = area.bottom() - int(config.PET_SIZE * 4.5)
+        self.win = SnackGameWindow(QRect(area.left(), self.top, area.width(), area.bottom() - self.top))
+        self.win.show()
+        self.area = area
+        self.next_drop = 0.5
+        self.rnd = random.Random()
+        pet.bubble.say("Snack catch!", "Move your mouse to steer me. Catch the snacks!", 3)
+
+    def update(self, dt):
+        from PyQt6.QtGui import QCursor
+        self.t += dt
+        w = self.win
+        w.left = 20 - self.t
+        pet = self.pet
+        target = QCursor.pos().x() - config.PET_SIZE / 2                # Blip follows the mouse
+        step = 900 * dt
+        pet.x_pos += max(-step, min(step, target - pet.x_pos))
+        left, right = pet.walk_bounds()
+        pet.x_pos = max(left, min(pet.x_pos, right))
+        pet.facing = 1 if target > pet.x_pos else -1
+        pet.step += dt * 12
+        if self.t >= self.next_drop and w.left > 1:
+            self.next_drop = self.t + self.rnd.uniform(0.35, 0.8)
+            w.snacks.append([self.rnd.uniform(30, w.width() - 30), -20.0, self.rnd.uniform(220, 380)])
+        catch_y = w.height() - config.PET_SIZE * 0.75
+        mouth = pet.center_x() - w.x()
+        keep = []
+        for s_ in w.snacks:
+            s_[1] += s_[2] * dt
+            if abs(s_[1] - catch_y) < 22 and abs(s_[0] - mouth) < config.PET_SIZE * 0.4:
+                w.score += 1
+                pet.set_expr("happy", 0.6)
+                continue
+            if s_[1] < w.height() + 20:
+                keep.append(s_)
+        w.snacks = keep
+        w.update()
+        if self.t >= self.duration:
+            score = w.score
+            import progress
+            prog = progress.get()
+            ev = prog.award("snackgame", score * 5)
+            import care
+            ev += care.bump(prog, "snackgame", score)
+            prog.save()
+            pet.bubble.say("Game over!", f"You caught {score} snacks! +{score * 5} XP", 4)
+            pet.handle_xp(ev)
+            return True
+        return False
+
+    def paint(self, p):
+        self.pet.draw_body(p, state="walk", expr="happy" if self.pet.expr == "happy" else None)
+
+    def end(self):
+        if self.win is not None:
+            self.win.close(); self.win.deleteLater(); self.win = None
 
 
 def make_emote(kind):
@@ -802,6 +922,10 @@ class NflThrow(Antic):
 ALL = {"trip": Trip, "football": Football, "nfl": NflThrow, "sneeze": Sneeze,
        "butterfly": Butterfly, "spin": Spin, "doze": Doze, "climb": Climb,
        "seek": HideSeek, "pose": Pose,
-       "emote:Wave": make_emote("Wave"), "emote:Flex": make_emote("Flex"), "emote:Laugh": make_emote("Laugh")}
+       "emote:Wave": make_emote("Wave"), "emote:Flex": make_emote("Flex"), "emote:Laugh": make_emote("Laugh"),
+       "snackgame": SnackGame}
 # How likely each one is in the random pick (football + NFL a bit more, doze-off rare).
 WEIGHTS = {"trip": 3, "football": 4, "nfl": 4, "sneeze": 3, "butterfly": 3, "spin": 3, "doze": 1, "climb": 3}
+
+# v1.2: more random antics (blaster, banana, gum, dumbbell, plane, balloon, chili, skateboard, magic)
+import antics2  # noqa: E402,F401  (registers itself in ALL / WEIGHTS)

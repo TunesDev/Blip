@@ -67,6 +67,8 @@ class Progress:
         self.skin = d.get("skin", "None")
         self.aura = bool(d.get("aura", True))
         self.birthday = d.get("birthday", "")             # "MM-DD"
+        self.stats = d.get("stats", {})                     # counters for achievements
+        self.achievements = d.get("achievements", [])
         self.tokens = int(d.get("tokens", 0))              # Prestige Shop currency
         self.levels_gained = int(d.get("levels_gained", 0))
         self.owned = list(d.get("owned", []))
@@ -80,7 +82,8 @@ class Progress:
         DATA_DIR.mkdir(parents=True, exist_ok=True)
         d = {k: getattr(self, k) for k in ("level", "xp", "prestige", "total", "daily", "streak",
                                            "last_day", "skin", "aura", "birthday", "tokens",
-                                           "levels_gained", "owned", "equipped", "quests", "weekly")}
+                                           "levels_gained", "owned", "equipped", "quests", "weekly",
+                                           "stats", "achievements")}
         tmp = FILE.with_suffix(".tmp")
         tmp.write_text(json.dumps(d, indent=2), encoding="utf-8")
         os.replace(tmp, FILE)
@@ -118,6 +121,9 @@ class Progress:
         if amount is not None:
             gain = amount
         events = self.quest_step(source)                  # quests count even past the XP cap
+        import care
+        if source != "snackgame":                         # (the mini-game counts snacks itself)
+            events += care.bump(self, source)             # achievements count every time
         used = self.daily.get(source, 0)
         if used >= cap or gain <= 0:
             if events:
@@ -129,6 +135,7 @@ class Progress:
     def _add(self, gain):
         events = [("xp", gain)]
         self.total += gain
+        self.daily["xp"] = self.daily.get("xp", 0) + gain
         if self.level >= MAX_LEVEL:                       # waiting to prestige / Master
             self.save()
             return events
@@ -137,6 +144,8 @@ class Progress:
             self.xp -= xp_for_level(self.level)
             self.level += 1
             self.levels_gained += 1
+            import care
+            events += care.bump(self, "level", value=self.level)
             events.append(("level", self.level))
             if self.levels_gained % 10 == 0:              # a token every 10 levels
                 self.tokens += 1
@@ -157,11 +166,14 @@ class Progress:
         self.streak = self.streak + 1 if self.last_day == yesterday else 1
         self.last_day = today.isoformat()
         bonus = min(config.XP_STREAK_MAX, config.XP_STREAK_BONUS * (self.streak - 1))
-        return self.award("daily", config.XP_SOURCES["daily"][0] + bonus)
+        import care
+        return self.award("daily", config.XP_SOURCES["daily"][0] + bonus) + \
+            care.bump(self, "streak", value=self.streak)
 
     def active_tick(self, seconds):
         """Called every few seconds while you're at the PC."""
         self.active_secs += seconds
+        self.daily["active_secs"] = self.daily.get("active_secs", 0) + seconds
         if self.active_secs >= 600:
             self.active_secs -= 600
             return self.award("active")
@@ -172,6 +184,8 @@ class Progress:
             return False
         self.prestige += 1
         self.tokens += 3
+        import care
+        care.bump(self, "prestige", value=self.prestige)
         self.level, self.xp = 1, 0
         self.save()
         return True
@@ -195,6 +209,8 @@ class Progress:
             entry[1] += 1
             if entry[1] >= q[3]:
                 entry[2] = True
+                import care
+                events += care.bump(self, "quest")
                 events.append(("quest", q[1], q[4]))
                 events += self._add(q[4])
                 events += self.weekly_step()
