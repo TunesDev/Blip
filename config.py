@@ -5,7 +5,7 @@ Developed by Tunes
 
 APP_NAME = "Blip"
 CREDIT = "Developed by Tunes"
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 
 # --- Looks (change these in the Settings window, they get saved) ---
 CHARACTER = "Blob"        # Blob, Cat, Bunny, Ghost
@@ -131,12 +131,20 @@ XP_SOURCES = {
     "focus": (80, 4),        # finished focus sessions
     "trick": (10, 5),        # antics you start from the Play menu
     "seek": (60, 3),         # winning hide and seek
+    "music": (50, 6),        # every 15 min of music/radio with Blip
+    "launch": (15, 5),       # opening an app through Blip
+    "catch": (30, 5),        # catching Blip in mid-air
+    "throw": (20, 5),        # throwing Blip far (bigger throws give more)
+    "jump": (3, 10),         # double-click jumps
+    "happy": (100, 1),       # keeping Blip's happiness above 70
+    "first_chat": (50, 1),   # first chat of the day
 }
 XP_STREAK_BONUS = 20         # extra XP per day of streak...
 XP_STREAK_MAX = 200          # ...up to this much
 
 # --- Updates (see updater.py) ---
 UPDATE_REPO = "TunesDev/Blip"   # GitHub repo that hosts Blip's releases
-AUTO_UPDATE = True              # check once a day for a new version
-UPDATE_LAST = ""                # date of the last check
+AUTO_UPDATE = True              # check at start + every 6 h, install updates automatically
+UPDATE_LAST = ""                # time of the last check
+LAST_VERSION = "1.1.0"               # to say "Updated to vX!" after an update
 FIRST_RUN_DONE = False          # the welcome window has been shown

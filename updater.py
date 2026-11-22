@@ -55,13 +55,16 @@ class Updater(QObject):
 
     # ---- checking ------------------------------------------------------------------------
     def due(self):
-        return config.AUTO_UPDATE and config.UPDATE_LAST != datetime.date.today().isoformat()
+        try:
+            return config.AUTO_UPDATE and __import__("time").time() - float(config.UPDATE_LAST or 0) > 6 * 3600
+        except ValueError:
+            return config.AUTO_UPDATE
 
     def check(self, manual=False):
         if self.busy:
             return
         self.busy = True
-        config.UPDATE_LAST = datetime.date.today().isoformat()
+        config.UPDATE_LAST = str(int(__import__("time").time()))
         try:
             import settings
             settings.save()

@@ -136,6 +136,10 @@ def build_menu(pet, app) -> QMenu:
     play.addAction("Throw the NFL ball", lambda: pet.trick("nfl"))
     play.addAction("Climb the desktop", lambda: pet.trick("climb"))
     play.addAction("Hide and seek", lambda: pet.trick("seek"))
+    emotes = glass_menu(play)
+    emotes.setTitle("Emotes")
+    play.addMenu(emotes)
+    play.addAction("Prestige Shop…", lambda: ShopDialog(pet).exec())
     play.addAction("Surprise me!", lambda: pet.trick())
     play.addSeparator()
     focus_action = play.addAction("Focus 25 min", lambda: pet.stop_focus() if extras.focus_left() else pet.start_focus(25))
@@ -152,6 +156,12 @@ def build_menu(pet, app) -> QMenu:
         badge = progress.get().badge()
         title.setText(f"{config.APP_NAME}  {badge}  ·  {config.CREDIT}" if badge else
                       f"{config.APP_NAME}  ·  {config.CREDIT}")
+        emotes.clear()
+        owned = [i for i in progress.get().owned if i in ("Wave", "Flex", "Laugh")]
+        for e in owned:
+            emotes.addAction(e, lambda e=e: pet.trick("emote:" + e))
+        if not owned:
+            emotes.addAction("Buy emotes in the Prestige Shop").setEnabled(False)
         on = extras.dnd_on()
         dnd.setTitle("Do not disturb (on)" if on else "Do not disturb")
         dnd_off.setEnabled(on)
@@ -276,7 +286,9 @@ class SettingsDialog(GlassDialog):
         self.theme = QComboBox(); self.theme.addItems(list(THEMES))
         self.theme.setCurrentText(config.THEME)
         import progress
-        self.hat = QComboBox(); self.hat.addItems(HATS + progress.get().unlocked_hats())
+        import shop
+        shop_hats = [i for i in progress.get().owned if shop.ITEMS.get(i, ("",))[0] == "hat"]
+        self.hat = QComboBox(); self.hat.addItems(HATS + progress.get().unlocked_hats() + shop_hats)
         self.hat.setCurrentText(config.HAT)
         looks.addRow("Character", self.character)
         looks.addRow("Colours", self.theme)
@@ -333,9 +345,10 @@ class SettingsDialog(GlassDialog):
         lvl = QHBoxLayout()
         need = progress.xp_for_level(prog.level)
         frac = 1.0 if prog.level >= progress.MAX_LEVEL else prog.xp / need
-        bar = "█" * int(frac * 12) + "░" * (12 - int(frac * 12))
-        xp_text = "MAX" if prog.level >= progress.MAX_LEVEL else f"{prog.xp:,}/{need:,} XP"
-        lvl.addWidget(QLabel(f"<b>{prog.title()}</b>   {bar}  {xp_text}   ·   streak {prog.streak} day(s)"))
+        xp_text = "MAX" if prog.level >= progress.MAX_LEVEL else f"{prog.xp:,} / {need:,} XP"
+        lvl.addWidget(QLabel(f"<b>{prog.title()}</b>"))
+        lvl.addWidget(GlassBar(frac, xp_text, 190))
+        lvl.addWidget(QLabel(f"streak {prog.streak}d · {prog.tokens} tokens"))
         lvl.addStretch()
         if prog.can_prestige:
             pb = QPushButton("Prestige!"); pb.setObjectName("primary"); pb.setAutoDefault(False)
@@ -344,7 +357,21 @@ class SettingsDialog(GlassDialog):
         sk = QPushButton(f"Skins… ({prog.skin})"); sk.setAutoDefault(False)
         sk.clicked.connect(lambda: SkinsDialog(self.pet).exec())
         lvl.addWidget(sk)
+        shop_btn = QPushButton("Prestige Shop…"); shop_btn.setAutoDefault(False)
+        shop_btn.clicked.connect(lambda: ShopDialog(self.pet).exec())
+        lvl.addWidget(shop_btn)
         self.root.addLayout(lvl)
+        quests = QHBoxLayout()
+        parts = []
+        for q, count, done in prog.today_quests():
+            parts.append(("✔ " if done else "○ ") + f"{q[1]} ({min(count, q[3])}/{q[3]})")
+        wk, wk_done = prog.week_progress()
+        qlabel = QLabel("<b>Today's quests:</b>  " + "   ·   ".join(parts) +
+                        f"<br><b>Weekly:</b> finish {progress.WEEKLY_GOAL} quests ({min(wk, progress.WEEKLY_GOAL)}/"
+                        f"{progress.WEEKLY_GOAL}){' ✔' if wk_done else ''}  → +{progress.WEEKLY_XP} XP + 1 token")
+        qlabel.setWordWrap(True)
+        quests.addWidget(qlabel)
+        self.root.addLayout(quests)
         self.aura = QCheckBox("Show my prestige aura around Blip")
         self.aura.setChecked(prog.aura)
         if prog.prestige:
@@ -359,11 +386,11 @@ class SettingsDialog(GlassDialog):
         snd.addWidget(self.sounds)
         import extras
         happy = int(extras.happiness())
-        bar = "█" * (happy // 10) + "░" * (10 - happy // 10)
         snd.addStretch()
-        snd.addWidget(QLabel(f"Happiness  {bar}  {happy}%"))
+        snd.addWidget(QLabel("Happiness"))
+        snd.addWidget(GlassBar(happy / 100, f"{happy}%", 150, pink=True))
         self.root.addLayout(snd)
-        self.auto_update = QCheckBox("Check for updates automatically (once a day)")
+        self.auto_update = QCheckBox("Install updates automatically (checks every 6 hours)")
         self.auto_update.setChecked(config.AUTO_UPDATE)
         self.root.addWidget(self.auto_update)
         self.startup = QCheckBox("Start Blip with Windows")
@@ -809,6 +836,7 @@ class ChatWindow(GlassDialog):
         self.input.clear()
         self.add("me", text)
         __import__("extras").cheer("chat")
+        __import__("extras").cheer("first_chat")
         import re as _re
         fm = _re.search(r"\bfocus\b(?:\s+(?:for\s+)?(\d+)\s*(?:min|mins|minutes|m)?)?", text, _re.I)
         if fm and _re.search(r"\b(focus for|focus mode|let'?s focus|start focus|focus \d)", text, _re.I):
@@ -849,6 +877,7 @@ class ChatWindow(GlassDialog):
             if app is None:
                 return
             launcher.launch(app)
+            __import__("extras").cheer("launch")
             self.add("note", f"🚀 Opening {app['name']}… {app.get('say', '')}")
             self.pet.set_expr("happy", 2.5)
             self.pet.jump()
@@ -1195,3 +1224,150 @@ class SkinsDialog(GlassDialog):
         self.pet.update()
         if self.pet.after_settings:
             self.pet.after_settings()
+
+
+# ---------------------------------------------------------------------------
+# Glass progress bar + Prestige Shop
+# ---------------------------------------------------------------------------
+class GlassBar(QWidget):
+    """Rounded bar: dark track, purple-to-cyan (or pink) gradient fill, text inside."""
+
+    def __init__(self, frac, text, width=180, pink=False):
+        super().__init__()
+        self.frac, self.text, self.pink = max(0.0, min(1.0, frac)), text, pink
+        self.setFixedSize(width, 18)
+
+    def paintEvent(self, e):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        r = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+        p.setPen(QPen(QColor(160, 110, 255, 120), 1))
+        p.setBrush(QColor(12, 8, 30, 220))
+        p.drawRoundedRect(r, 9, 9)
+        if self.frac > 0:
+            g = QLinearGradient(r.topLeft(), r.topRight())
+            if self.pink:
+                g.setColorAt(0, QColor(255, 90, 170)); g.setColorAt(1, QColor(255, 200, 120))
+            else:
+                g.setColorAt(0, QColor(154, 90, 255)); g.setColorAt(1, QColor(0, 225, 255))
+            p.setPen(Qt.PenStyle.NoPen); p.setBrush(QBrush(g))
+            p.drawRoundedRect(QRectF(r.left() + 1, r.top() + 1, max(16, (r.width() - 2) * self.frac), r.height() - 2), 8, 8)
+            p.setBrush(QColor(255, 255, 255, 40))
+            p.drawRoundedRect(QRectF(r.left() + 3, r.top() + 2, max(10, (r.width() - 6) * self.frac), 5), 3, 3)
+        p.setPen(QColor(245, 250, 255))
+        from PyQt6.QtGui import QFont
+        f = QFont("Segoe UI", 8); f.setBold(True); p.setFont(f)
+        p.drawText(r, Qt.AlignmentFlag.AlignCenter, self.text)
+        p.end()
+
+
+class ShopDialog(GlassDialog):
+    def __init__(self, pet):
+        from PyQt6.QtWidgets import QGridLayout, QToolButton, QTabWidget
+        from PyQt6.QtGui import QIcon, QPixmap
+        from PyQt6.QtCore import QSize
+        import progress, shop
+        super().__init__("Prestige Shop")
+        self.pet, self.prog = pet, progress.get()
+        self.tokens = QLabel()
+        self.root.addWidget(self.tokens)
+        self.root.addWidget(QLabel("Earn tokens: 3 per prestige, 1 for every 10 levels, 1 per weekly challenge."))
+        tabs = QTabWidget()
+        tabs.setStyleSheet("QTabWidget::pane{border:1px solid rgba(160,110,255,90);border-radius:8px}"
+                           "QTabBar::tab{background:rgba(255,255,255,14);color:#EAF6FF;padding:6px 12px;"
+                           "border-top-left-radius:6px;border-top-right-radius:6px;font:9pt 'Segoe UI'}"
+                           "QTabBar::tab:selected{background:rgba(0,225,255,60)}")
+        self.buttons = {}
+        for slot in shop.SLOTS:
+            page = QWidget(); grid = QGridLayout(page); grid.setSpacing(6)
+            items = [n for n, v in shop.ITEMS.items() if v[0] == slot]
+            for i, name in enumerate(items):
+                b = QToolButton()
+                b.setIcon(QIcon(self.preview_pix(name, slot))); b.setIconSize(QSize(56, 56))
+                b.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
+                b.setFixedSize(112, 96)
+                b.setStyleSheet("QToolButton{color:#EAF6FF;font:8pt 'Segoe UI';background:rgba(255,255,255,12);"
+                                "border:1px solid rgba(160,110,255,90);border-radius:8px}"
+                                "QToolButton:hover{background:rgba(0,225,255,50)}"
+                                "QToolButton:disabled{color:rgba(234,246,255,90)}")
+                b.clicked.connect(lambda _=False, n=name: self.click(n))
+                grid.addWidget(b, i // 4, i % 4)
+                self.buttons[name] = b
+            tabs.addTab(page, shop.SLOT_NAMES[slot])
+        self.root.addWidget(tabs)
+        close = QPushButton("Done"); close.setObjectName("primary"); close.setAutoDefault(False)
+        close.clicked.connect(self.accept)
+        self.root.addWidget(close, alignment=Qt.AlignmentFlag.AlignRight)
+        self.add_credit()
+        self.refresh()
+
+    def preview_pix(self, name, slot):
+        from PyQt6.QtGui import QPixmap
+        pix = QPixmap(64, 64); pix.fill(Qt.GlobalColor.transparent)
+        p = QPainter(pix)
+        gear = {k: v for k, v in self.prog.equipped.items()}
+        hat = "None"
+        if slot == "hat":
+            hat = name
+        elif slot in ("glasses", "extra", "trail"):
+            gear = {slot: name}
+        draw_pet(p, 64, "walk" if slot == "trail" else "idle", 1.0, hat=hat, gear=gear, skin="None")
+        if slot == "trail":
+            import shop
+            shop.draw_trail(p, name, 64, 1.0, 1, True)
+        p.end()
+        return pix
+
+    def state(self, name):
+        import shop
+        slot, price, need = shop.ITEMS[name]
+        if name in self.prog.owned:
+            on = (config.HAT == name) if slot == "hat" else (self.prog.equipped.get(slot) == name)
+            return "equipped" if on else "owned"
+        if self.prog.prestige < need:
+            return f"Prestige {need}"
+        return f"{price} token" + ("s" if price != 1 else "")
+
+    def refresh(self):
+        self.tokens.setText(f"<b>Prestige Tokens: {self.prog.tokens}</b>")
+        for name, b in self.buttons.items():
+            st = self.state(name)
+            label = {"equipped": "✔ Equipped", "owned": "Equip"}.get(st, st)
+            b.setText(f"{name}\n{label}")
+            b.setEnabled(not st.startswith("Prestige"))
+
+    def click(self, name):
+        import shop
+        slot, price, need = shop.ITEMS[name]
+        st = self.state(name)
+        if st == "equipped":                                # take it off
+            if slot == "hat":
+                config.HAT = "None"
+            elif slot != "emote":
+                self.prog.equipped.pop(slot, None)
+        elif st == "owned":
+            if slot == "hat":
+                config.HAT = name
+            elif slot == "emote":
+                self.pet.trick("emote:" + name)
+            else:
+                self.prog.equipped[slot] = name
+        else:
+            if self.prog.tokens < price:
+                self.pet.bubble.say("Prestige Shop", f"You need {price} tokens for that ({self.prog.tokens} now).", 4)
+                return
+            if not ConfirmDialog("Buy?", f"Buy {name} for {price} token{'s' if price != 1 else ''}?",
+                                 yes="Buy", no="Cancel").exec():
+                return
+            if self.prog.buy(name):
+                if slot == "hat":
+                    config.HAT = name
+                elif slot != "emote":
+                    self.prog.equipped[slot] = name
+                __import__("extras").play("yay")
+        self.prog.save()
+        settings.save()
+        self.pet.update()
+        if self.pet.after_settings:
+            self.pet.after_settings()
+        self.refresh()

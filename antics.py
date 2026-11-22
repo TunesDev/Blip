@@ -617,6 +617,41 @@ class Pose(Antic):
             p.drawLine(QPointF(hx * k, hy * k), QPointF((hx + math.sin(a) * 9) * k, (hy - math.cos(a) * 9) * k))
 
 
+class Emote(Antic):
+    """Shop emotes: Wave, Flex, Laugh (Play > Emotes)."""
+    duration = 2.4
+    margin = 20
+    walking_ok = True
+    kind = "Wave"
+
+    def paint(self, p):
+        from dance import Dancer
+        k, t, f = s(), self.t, self.pet.facing
+        if self.kind == "Wave":
+            self.pet.draw_body(p, state="idle", expr="happy")
+            sw = math.sin(t * 14) * 10
+            Dancer.arms(p, k, ((34, 96), (96 + sw * 0.3, 30 + abs(sw) * 0.3)), 0, (60, 110), 0, 0)
+        elif self.kind == "Flex":
+            self.pet.draw_body(p, state="idle", expr=None, dy=-abs(math.sin(t * 5)) * 3)
+            pump = abs(math.sin(t * 5)) * 4
+            Dancer.arms(p, k, ((14, 52 - pump), (106, 52 - pump)), 0, (60, 110), 0, 0)
+            p.setPen(Qt.PenStyle.NoPen); p.setBrush(rgba(THEMES.get(config.THEME, THEMES["Nexus"])[1], 230))
+            for x in (22, 98):                               # little muscles
+                p.drawEllipse(QPointF(x * k, (60 - pump) * k), 5 * k, 4 * k)
+        else:                                                # Laugh
+            shake = math.sin(t * 30) * 2
+            self.pet.draw_body(p, state="idle", expr="happy", dx=shake, dy=-abs(math.sin(t * 12)) * 3)
+            if int(t * 3) % 2 == 0:
+                from PyQt6.QtGui import QFont
+                f = QFont("Segoe UI", 1); f.setBold(True); f.setPixelSize(int(11 * k)); p.setFont(f)
+                p.setPen(rgba(THEMES.get(config.THEME, THEMES["Nexus"])[1], 240))
+                p.drawText(QPointF(70 * k, 30 * k), "HA HA")
+
+
+def make_emote(kind):
+    return type(f"Emote{kind}", (Emote,), {"kind": kind})
+
+
 # ---------------------------------------------------------------------------
 class FriendWindow(QWidget):
     """A second mini Blip that peeks in from the screen edge to play catch.
@@ -766,6 +801,7 @@ class NflThrow(Antic):
 
 ALL = {"trip": Trip, "football": Football, "nfl": NflThrow, "sneeze": Sneeze,
        "butterfly": Butterfly, "spin": Spin, "doze": Doze, "climb": Climb,
-       "seek": HideSeek, "pose": Pose}
+       "seek": HideSeek, "pose": Pose,
+       "emote:Wave": make_emote("Wave"), "emote:Flex": make_emote("Flex"), "emote:Laugh": make_emote("Laugh")}
 # How likely each one is in the random pick (football + NFL a bit more, doze-off rare).
 WEIGHTS = {"trip": 3, "football": 4, "nfl": 4, "sneeze": 3, "butterfly": 3, "spin": 3, "doze": 1, "climb": 3}

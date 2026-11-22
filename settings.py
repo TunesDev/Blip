@@ -18,7 +18,7 @@ SAVED_KEYS = ["CHARACTER", "THEME", "HAT", "EYES_FOLLOW_CURSOR", "PET_SIZE",
               "RADIO_STATION", "RADIO_VOLUME",
               "ANTICS", "DANCE",
               "DND_UNTIL", "SEASONAL", "HAPPY", "HAPPY_AT", "SOUNDS",
-              "AUTO_UPDATE", "UPDATE_LAST", "FIRST_RUN_DONE"]
+              "AUTO_UPDATE", "UPDATE_LAST", "FIRST_RUN_DONE", "LAST_VERSION"]
 
 DATA_DIR = Path(os.getenv("APPDATA", Path.home())) / "Blip"
 SETTINGS_FILE = DATA_DIR / "settings.json"

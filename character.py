@@ -30,7 +30,7 @@ def rgba(rgb, alpha):
 def draw_pet(p: QPainter, size: int, state: str, t: float,
              facing: int = 1, blink: float = 0.0, step: float = 0.0,
              look=(0.0, 0.0), expr=None, character=None, theme=None, hat=None,
-             sweat=False, sleepy=False, yawn=0.0, music=0.0, skin="auto"):
+             sweat=False, sleepy=False, yawn=0.0, music=0.0, skin="auto", gear="auto"):
     """
     state     - "idle", "walk", "sleep", "held", "fall" or "land"
     t         - time in seconds (drives breathing / bobbing)
@@ -166,9 +166,17 @@ def draw_pet(p: QPainter, size: int, state: str, t: float,
     else:
         path.addRoundedRect(body, bw * 0.45, bh * 0.5)
 
-    if skin == "auto":
+    if skin == "auto" or gear == "auto":
         import progress
-        skin = progress.get().skin
+        prog = progress.get()
+        if skin == "auto":
+            skin = prog.skin
+        if gear == "auto":
+            gear = prog.equipped
+    gear = gear or {}
+    if gear.get("extra") == "Cape":                    # capes go behind the body
+        import shop
+        shop.draw_extra(p, "Cape", body, bw, t, behind=True)
     if skin and skin != "None" and state in ("fall", "held") and skin == "Phoenix":
         import skins
         skins.paint_wings(p, body, t)
@@ -258,6 +266,12 @@ def draw_pet(p: QPainter, size: int, state: str, t: float,
                 p.drawLine(QPointF(mx + side * 12, eye_y + 9 + dy),
                            QPointF(mx + side * 24, eye_y + 8 + dy * 2))
 
+    if gear.get("glasses") and state != "sleep":
+        import shop
+        shop.draw_glasses(p, gear["glasses"], bcx - eye_dx + look_x, bcx + eye_dx + look_x, eye_y)
+    if gear.get("extra") and gear["extra"] != "Cape":
+        import shop
+        shop.draw_extra(p, gear["extra"], body, bw, t)
     draw_hat(p, hat, body, bw, t)
     if music > 0.0 and state in ("idle", "land", "walk"):
         draw_notes(p, bcx, body.top(), bw, t, accent, main_c)
@@ -334,6 +348,10 @@ def draw_drop(p, x, y, r, alpha):
 def draw_hat(p, hat, body, bw, t):
     top, cx = body.top(), body.center().x()
     p.setPen(Qt.PenStyle.NoPen)
+    if hat and hat not in HATS and hat not in ("Party hat", "Pumpkin", "Shamrock"):
+        import shop                                   # hats from the Prestige Shop
+        if shop.draw_hat_extra(p, hat, cx, top, bw, t):
+            return
     if hat == "Santa hat":
         path = QPainterPath()
         path.moveTo(cx - 20, top + 6)

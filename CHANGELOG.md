@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.1.0
+
+- New glassy XP and happiness bars
+- XP pop-up above Blip whenever you earn XP (name tag + mini bar + "+15 XP")
+- More ways to earn XP: music/radio time, catching Blip mid-air, long throws, jumps, opening apps,
+  first chat of the day, keeping Blip happy
+- Daily quests (3 a day) and a weekly challenge
+- Prestige Shop with Prestige Tokens: glasses, hats, capes/scarves/chains, trails, name-tag colours, emotes
+- Updates now install automatically in the background (checks at start and every 6 hours;
+  waits until you're not gaming, chatting or focusing). Can be switched off.
+
 ## 1.0.0 (first public release)
 
 - See-through desktop pet that walks the taskbar, naps, sits on windows and climbs desktop icons

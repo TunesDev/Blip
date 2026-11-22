@@ -10,6 +10,7 @@ Developed by Tunes
 import datetime
 import json
 import os
+import random
 import time
 
 import config
@@ -18,6 +19,24 @@ from settings import DATA_DIR
 FILE = DATA_DIR / "progress.json"
 MAX_LEVEL = 55
 MAX_PRESTIGE = 10
+
+# Daily quests: (id, text, XP source that counts, how many, bonus XP)
+QUESTS = [
+    ("feed2", "Feed Blip twice", "feed", 2, 120),
+    ("pet1", "Pet Blip", "pet", 1, 80),
+    ("seek1", "Win hide and seek", "seek", 1, 150),
+    ("focus1", "Finish a focus session", "focus", 1, 150),
+    ("throw1", "Throw Blip across the screen", "throw", 1, 100),
+    ("catch1", "Catch Blip in mid-air", "catch", 1, 120),
+    ("chat3", "Chat with Blip 3 times", "chat", 3, 100),
+    ("trick2", "Ask Blip for 2 tricks", "trick", 2, 100),
+    ("music2", "Listen to music with Blip for 30 min", "music", 2, 120),
+    ("task1", "Finish a reminder or to-do", "task", 1, 100),
+    ("jump3", "Make Blip jump 3 times", "jump", 3, 80),
+    ("app1", "Open an app through Blip", "launch", 1, 80),
+]
+WEEKLY_GOAL = 12                 # daily quests in a week -> weekly challenge done
+WEEKLY_XP, WEEKLY_TOKENS = 600, 1
 
 # Hats you unlock to wear any time of year (the seasonal ones still come by themselves).
 HAT_UNLOCKS = {3: "Party hat", 7: "Shamrock", 13: "Pumpkin"}
@@ -48,13 +67,20 @@ class Progress:
         self.skin = d.get("skin", "None")
         self.aura = bool(d.get("aura", True))
         self.birthday = d.get("birthday", "")             # "MM-DD"
+        self.tokens = int(d.get("tokens", 0))              # Prestige Shop currency
+        self.levels_gained = int(d.get("levels_gained", 0))
+        self.owned = list(d.get("owned", []))
+        self.equipped = dict(d.get("equipped", {}))         # slot -> item (glasses, extra, trail, tag)
+        self.quests = d.get("quests", {})                   # {"day":..., "list":[[id, count, done]]}
+        self.weekly = d.get("weekly", {})                   # {"week":..., "count":n, "done":bool}
         self.active_secs = 0
 
     # ---- saving --------------------------------------------------------------------------
     def save(self):
         DATA_DIR.mkdir(parents=True, exist_ok=True)
         d = {k: getattr(self, k) for k in ("level", "xp", "prestige", "total", "daily", "streak",
-                                           "last_day", "skin", "aura", "birthday")}
+                                           "last_day", "skin", "aura", "birthday", "tokens",
+                                           "levels_gained", "owned", "equipped", "quests", "weekly")}
         tmp = FILE.with_suffix(".tmp")
         tmp.write_text(json.dumps(d, indent=2), encoding="utf-8")
         os.replace(tmp, FILE)
@@ -91,14 +117,17 @@ class Progress:
         gain, cap = config.XP_SOURCES.get(source, (0, 0))
         if amount is not None:
             gain = amount
+        events = self.quest_step(source)                  # quests count even past the XP cap
         used = self.daily.get(source, 0)
         if used >= cap or gain <= 0:
-            return []
+            if events:
+                self.save()
+            return events
         self.daily[source] = used + 1
-        return self._add(gain)
+        return events + self._add(gain)
 
     def _add(self, gain):
-        events = []
+        events = [("xp", gain)]
         self.total += gain
         if self.level >= MAX_LEVEL:                       # waiting to prestige / Master
             self.save()
@@ -107,7 +136,11 @@ class Progress:
         while self.level < MAX_LEVEL and self.xp >= xp_for_level(self.level):
             self.xp -= xp_for_level(self.level)
             self.level += 1
+            self.levels_gained += 1
             events.append(("level", self.level))
+            if self.levels_gained % 10 == 0:              # a token every 10 levels
+                self.tokens += 1
+                events.append(("token", 1))
             if self.level >= MAX_LEVEL:
                 self.xp = 0
                 if self.prestige < MAX_PRESTIGE:
@@ -138,7 +171,61 @@ class Progress:
         if not self.can_prestige:
             return False
         self.prestige += 1
+        self.tokens += 3
         self.level, self.xp = 1, 0
+        self.save()
+        return True
+
+
+    # ---- daily quests + weekly challenge -----------------------------------------------------
+    def today_quests(self):
+        today = datetime.date.today().isoformat()
+        if self.quests.get("day") != today:
+            picks = random.Random(today).sample(QUESTS, 3)
+            self.quests = {"day": today, "list": [[q[0], 0, False] for q in picks]}
+        return [(dict((q[0], q) for q in QUESTS)[qid], count, done) for qid, count, done in self.quests["list"]]
+
+    def quest_step(self, source):
+        events = []
+        self.today_quests()
+        for entry in self.quests["list"]:
+            q = dict((x[0], x) for x in QUESTS)[entry[0]]
+            if entry[2] or q[2] != source:
+                continue
+            entry[1] += 1
+            if entry[1] >= q[3]:
+                entry[2] = True
+                events.append(("quest", q[1], q[4]))
+                events += self._add(q[4])
+                events += self.weekly_step()
+        return events
+
+    def weekly_step(self):
+        y, w, _ = datetime.date.today().isocalendar()
+        key = f"{y}-W{w}"
+        if self.weekly.get("week") != key:
+            self.weekly = {"week": key, "count": 0, "done": False}
+        self.weekly["count"] += 1
+        if not self.weekly["done"] and self.weekly["count"] >= WEEKLY_GOAL:
+            self.weekly["done"] = True
+            self.tokens += WEEKLY_TOKENS
+            return [("weekly", WEEKLY_XP)] + self._add(WEEKLY_XP)
+        return []
+
+    def week_progress(self):
+        y, w, _ = datetime.date.today().isocalendar()
+        if self.weekly.get("week") != f"{y}-W{w}":
+            return 0, False
+        return self.weekly.get("count", 0), self.weekly.get("done", False)
+
+    # ---- shop ------------------------------------------------------------------------------
+    def buy(self, item):
+        import shop
+        slot, price, need = shop.ITEMS[item]
+        if item in self.owned or self.tokens < price or self.prestige < need:
+            return False
+        self.tokens -= price
+        self.owned.append(item)
         self.save()
         return True
 

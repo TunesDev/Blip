@@ -468,6 +468,13 @@ class PetWindow(QWidget):
             self.pending_say = None
         if getattr(self, "pending_update", None):
             self.finish_update()
+        pop = getattr(self, "xp_popup", None)
+        if pop is not None:
+            if pop.alive():
+                pop.follow(self.x_pos, self.y_pos, config.PET_SIZE,
+                           self.current_screen().availableGeometry())
+            else:                                    # gone: free it
+                pop.close(); pop.deleteLater(); self.xp_popup = None
         if self.ask is not None:
             self.ask.follow(self.x_pos, self.y_pos, config.PET_SIZE,
                             self.current_screen().availableGeometry())
@@ -638,7 +645,15 @@ class PetWindow(QWidget):
         self.maybe_check_updates(now)
         if user_idle_seconds() < 60 and not self.paused_now():
             import progress
-            ev = progress.get().active_tick(6)
+            prog = progress.get()
+            ev = prog.active_tick(6)
+            if self.music_on:                        # listening to music together
+                self.music_secs = getattr(self, "music_secs", 0) + 6
+                if self.music_secs >= 900:
+                    self.music_secs = 0
+                    ev += prog.award("music")
+            if __import__("extras").happiness() >= 70:
+                ev += prog.award("happy")
             if ev:
                 self.handle_xp(ev)
             self.maybe_offer_seek(now)
@@ -1016,6 +1031,12 @@ class PetWindow(QWidget):
             else:                                    # slow: land
                 self.vx = self.vy = 0.0
                 self.set_state("land")
+                if getattr(self, "throw_from", None) is not None:
+                    dist = abs(self.x_pos - self.throw_from)
+                    self.throw_from = None
+                    if dist > 500:                   # thrown far across the screen
+                        import progress
+                        self.handle_xp(progress.get().award("throw", int(min(80, dist / 15))))
 
         if abs(self.vx) > 30:
             self.facing = 1 if self.vx > 0 else -1
@@ -1026,6 +1047,8 @@ class PetWindow(QWidget):
         if event.button() != Qt.MouseButton.LeftButton:
             return
         offset = QPoint(self.margin, self.margin)
+        if self.state == "fall" and abs(self.vy) + abs(self.vx) > 300 and self.antic is None:
+            __import__("extras").cheer("catch")        # caught him in mid-air!
         if self.antic is not None:
             if type(self.antic).__name__ == "HideSeek" and self.antic.t >= 0.6:
                 self.antic.caught()             # found him!
@@ -1098,6 +1121,7 @@ class PetWindow(QWidget):
         self.vx = max(-cap, min(cap, self.vx))
         self.vy = max(-cap, min(cap, self.vy))
         self.last_tick = now
+        self.throw_from = self.x_pos if abs(self.vx) > 600 else None
         self.set_state("fall")
 
     def mouseDoubleClickEvent(self, event):
@@ -1110,6 +1134,7 @@ class PetWindow(QWidget):
             return
         self.set_state("idle")
         self.jump()
+        __import__("extras").cheer("jump")
 
     # ---------- drawing ---------------------------------------------------------
     def blink_amount(self):
@@ -1172,6 +1197,11 @@ class PetWindow(QWidget):
             p.setBrush(QColor(0, 0, 0))
             p.drawEllipse(QPointF(17.5 * k, 13.5 * k), 6 * k, 6 * k)
             p.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceOver)
+        import progress as _pg
+        trail = _pg.get().equipped.get("trail")
+        if trail:
+            import shop
+            shop.draw_trail(p, trail, config.PET_SIZE, t, self.facing, self.state in ("walk", "fall", "held"))
         effect = "confetti" if time.monotonic() < self.confetti_until else extras.season_effect()
         if time.monotonic() < self.blush_until:              # petted: rosy cheeks
             p.setPen(QColor(0, 0, 0, 0))
@@ -1283,11 +1313,24 @@ class PetWindow(QWidget):
         return self.updater
 
     def maybe_check_updates(self, now):
+        if getattr(self, "update_waiting", False) and self.good_time_to_update():
+            self.update_waiting = False
+            self.start_update()
+            return
         if now - self.start < 60 or not config.AUTO_UPDATE:
             return
-        if config.UPDATE_LAST == __import__("datetime").date.today().isoformat():
+        try:
+            last = float(config.UPDATE_LAST or 0)
+        except ValueError:
+            last = 0.0
+        if time.time() - last < 6 * 3600:
             return
         self.get_updater().check()
+
+    def good_time_to_update(self):
+        import extras
+        return (not self.hidden_for_game and self.chat is None and extras.focus_left() <= 0
+                and self.antic is None)
 
     def check_updates(self):
         self.bubble.say("Updates", "Checking for updates…", 3)
@@ -1295,8 +1338,15 @@ class PetWindow(QWidget):
 
     def on_update_result(self, r):
         if r["status"] == "new":
-            self.ask_bubble(f"Update available (v{r['version']})!", self.start_update, yes="Update",
-                            no="Later", seconds=60)
+            self.update_version = r["version"]
+            if config.AUTO_UPDATE or r.get("manual"):
+                if self.good_time_to_update():
+                    self.start_update()
+                else:
+                    self.update_waiting = True          # after the game / chat / focus session
+            else:
+                self.ask_bubble(f"Update available (v{r['version']})!", self.start_update,
+                                yes="Update", no="Later", seconds=60)
         elif r.get("manual"):
             if r["status"] == "current":
                 self.bubble.say("Updates", f"You're up to date (v{r['version']}).", 4)
@@ -1304,7 +1354,7 @@ class PetWindow(QWidget):
                 self.bubble.say("Updates", r.get("msg", "Couldn't check for updates."), 6)
 
     def start_update(self):
-        self.bubble.say("Updating", "Downloading the update…", 30)
+        self.bubble.say("Updating", f"Updating to v{getattr(self, 'update_version', '')}…", 20)
 
         def ready(path, msg):                       # (called from the download thread)
             self.pending_update = (path, msg)
@@ -1328,6 +1378,11 @@ class PetWindow(QWidget):
 
     def hello_today(self):
         import progress, extras, datetime as dt
+        if config.LAST_VERSION != config.VERSION:
+            if config.LAST_VERSION:
+                self.bubble.say("Updated!", f"Updated to v{config.VERSION}!", 5)
+            config.LAST_VERSION = config.VERSION
+            __import__("settings").save()
         prog = progress.get()
         ev = prog.daily_hello()
         if ev:
@@ -1345,8 +1400,18 @@ class PetWindow(QWidget):
 
     def handle_xp(self, events):
         import extras
+        gain = sum(ev[1] for ev in events if ev[0] == "xp")
+        if gain:
+            self.show_xp_popup(gain)
         for ev in events:
-            if ev[0] == "level":
+            if ev[0] == "quest":
+                self.bubble.say("Quest complete!", f"{ev[1]}  +{ev[2]} XP", 4)
+                extras.play("yay")
+            elif ev[0] == "weekly":
+                self.bubble.say("Weekly challenge done!", f"+{ev[1]} XP and a Prestige Token", 5)
+            elif ev[0] == "token":
+                self.bubble.say("Prestige Token!", "You earned a token for the Prestige Shop.", 4)
+            elif ev[0] == "level":
                 self.confetti_until = time.monotonic() + 3.5
                 self.bubble.say("LEVEL UP!", f"Level {ev[1]}", 3.5)
                 extras.play("yay")
@@ -1356,6 +1421,22 @@ class PetWindow(QWidget):
                 self.bubble.say("Level 55!", "You can Prestige now in Customise & settings!", 8)
         if getattr(self, "update_tray", None):
             self.update_tray()
+
+    def show_xp_popup(self, gain):
+        import progress, shop
+        prog = progress.get()
+        need = progress.xp_for_level(prog.level)
+        after = 1.0 if prog.level >= progress.MAX_LEVEL else prog.xp / need
+        before = max(0.0, after - gain / need)
+        if getattr(self, "xp_popup", None) is None:
+            from bubble import XPPopup
+            self.xp_popup = XPPopup()
+        badge = prog.badge()
+        name = config.APP_NAME + (f" {badge}" if badge else "")
+        self.xp_popup.add(gain, name, prog.level, before, after,
+                          shop.TAG_COLOURS.get(prog.equipped.get("tag")))
+        self.xp_popup.follow(self.x_pos, self.y_pos, config.PET_SIZE,
+                             self.current_screen().availableGeometry())
 
     def celebrate_prestige(self):
         import progress, extras
