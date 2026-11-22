@@ -1,0 +1,33 @@
+# Builds the installer and publishes a GitHub release when you push a tag like v1.0.1
+name: Release
+on:
+  push:
+    tags: ["v*"]
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install dependencies
+        run: |
+          python -m venv .venv
+          .\.venv\Scripts\python.exe -m pip install --upgrade pip
+          .\.venv\Scripts\python.exe -m pip install -r requirements.txt pyinstaller
+      - name: Install Inno Setup
+        run: choco install innosetup -y --no-progress
+      - name: Build release
+        shell: pwsh
+        run: |
+          $v = "${{ github.ref_name }}".TrimStart("v")
+          .\build_release.ps1 -Version $v
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release/BlipSetup-*.exe
+            release/BlipSetup-*.exe.sha256

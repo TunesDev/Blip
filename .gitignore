@@ -1,0 +1,26 @@
+# build output
+.venv/
+build/
+dist/
+release/
+*.spec
+__pycache__/
+*.pyc
+# old copies, logs, screenshots and personal/test data
+_old/
+*.log
+blip_out.txt
+blip_err.txt
+*.png
+!assets/*.png
+settings.json
+memory.json
+progress.json
+tasks.json
+games.json
+questions.json
+apps.json
+stations.json
+spotify.json
+.vs/
+.vscode/
