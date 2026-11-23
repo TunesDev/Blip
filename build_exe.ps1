@@ -4,7 +4,10 @@
 .\.venv\Scripts\python.exe make_icon.py
 # pre-generate the Windows UI Automation wrapper (used read-only by the desktop climber)
 .\.venv\Scripts\python.exe -c "import comtypes.client; comtypes.client.GetModule('UIAutomationCore.dll')"
-.\.venv\Scripts\python.exe -m PyInstaller --noconfirm --clean --windowed --name Blip `
+# PyInstaller's scratch files go to %TEMP% (not a "build" folder here): the Blip.exe in there
+# is not a working app, and people kept double-clicking it by mistake.
+$work = Join-Path $env:TEMP "BlipBuild"
+.\.venv\Scripts\python.exe -m PyInstaller --noconfirm --clean --windowed --name Blip --workpath $work `
     --icon assets\blip.ico --collect-submodules winrt --collect-binaries winrt `
     --exclude-module tkinter --exclude-module unittest --exclude-module pydoc `
     --exclude-module PyQt6.QtQml --exclude-module PyQt6.QtQuick --exclude-module PyQt6.QtWebEngineCore `

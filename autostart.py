@@ -4,6 +4,7 @@ Adds/removes Blip in HKEY_CURRENT_USER\\...\\Run, the same list Task Manager's
 "Startup apps" tab shows, so you can also switch it off there.
 Developed by Tunes
 """
+import os
 import sys
 from pathlib import Path
 
@@ -19,7 +20,11 @@ except ImportError:            # not Windows
 def launch_command() -> str:
     """How Windows should start Blip: the .exe, or pythonw + main.py when run from code."""
     if getattr(sys, "frozen", False):
-        return f'"{sys.executable}"'
+        exe = Path(sys.executable).resolve()
+        installed = Path(os.getenv("LOCALAPPDATA", "")) / "Programs" / "Blip" / "Blip.exe"
+        if installed.exists() and exe != installed:
+            return f'"{installed}"'                  # always start the installed copy (it updates itself)
+        return f'"{exe}"'
     exe = Path(sys.executable)
     pythonw = exe.with_name("pythonw.exe")
     if pythonw.exists():
